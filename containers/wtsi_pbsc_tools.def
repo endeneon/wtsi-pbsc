@@ -12,6 +12,8 @@ From: condaforge/miniforge3:latest
 #   isoquant=3.13.1  +  samtools/bcftools/htslib  +  scanpy/anndata/gffutils (python steps)
 #   bcftools/htslib (bgzip,tabix) cover the deconvolution (MPILEUP/SUBSET_VCF) and
 #   genotype-check (match_gt) VCF steps so those branches run without a separate image.
+#   bedtools covers the IsoQuant two-pass region steps (find_mapped_and_unmapped_*,
+#   acrossSamples_*) and the smartSplit chunked path; sinto covers SPLIT_BAM_SINTO.
 # Build (on the fakeroot LSF queue):
 #   singularity build --fakeroot wtsi_pbsc_tools.sif wtsi_pbsc_tools.def
 # ============================================================================
@@ -34,6 +36,8 @@ From: condaforge/miniforge3:latest
         samtools \
         bcftools \
         htslib \
+        bedtools \
+        sinto \
         scanpy \
         anndata \
         gffutils
@@ -76,7 +80,7 @@ From: condaforge/miniforge3:latest
     export HOME=/tmp NUMBA_CACHE_DIR=/tmp MPLCONFIGDIR=/tmp XDG_CACHE_HOME=/tmp
     # `skera`/`isoquant` are the real binaries; `pbskera`/`isoquant.py` are the
     # aliases the pipeline invokes.
-    for t in isoseq lima pbmm2 skera pbskera samtools bcftools bgzip tabix isoquant isoquant.py; do command -v "$t"; done
+    for t in isoseq lima pbmm2 skera pbskera samtools bcftools bgzip tabix bedtools sinto isoquant isoquant.py; do command -v "$t"; done
     # verify the isoquant.py wrapper actually runs (i.e. the isoquant import is not shadowed)
     isoquant.py --help >/dev/null
     python -c "import scanpy, anndata, gffutils, pandas, scipy, numpy, pysam; print('python deps OK')"
