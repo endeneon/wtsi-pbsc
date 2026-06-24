@@ -1,0 +1,82 @@
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+# ============================================================================
+# wtsi-pbsc combined tools image (St. Jude adaptation)
+# Provides every tool needed to run -entry full_segmented + run_mode: with_quant
+# (and the skipped pbskera/skera step), in a single image so processes that call
+# a PacBio tool AND samtools/python in the same script work.
+#
+# Tool pins (from the sibling nf-core/isoseq pipeline where available):
+#   isoseq=4.3.0  lima=2.13.0  pbmm2=1.17.0  pbskera=1.4.0
+#   isoquant=3.13.1  +  samtools/bcftools/htslib  +  scanpy/anndata/gffutils (python steps)
+#   bcftools/htslib (bgzip,tabix) cover the deconvolution (MPILEUP/SUBSET_VCF) and
+#   genotype-check (match_gt) VCF steps so those branches run without a separate image.
+# Build (on the fakeroot LSF queue):
+#   singularity build --fakeroot wtsi_pbsc_tools.sif wtsi_pbsc_tools.def
+# ============================================================================
+
+%labels
+    Maintainer   wtsi-pbsc StJude adaptation
+    Description  PacBio Iso-Seq single-cell + IsoQuant toolchain
+
+%post
+    set -eux
+    export MAMBA_NO_BANNER=1
+    # PacBio tools are dependency-free static binaries; samtools/isoquant/scanpy
+    # bring the shared python + htslib stack the mixed-tool processes rely on.
+    mamba install -y -n base -c conda-forge -c bioconda \
+        isoseq=4.3.0 \
+        lima=2.13.0 \
+        pbmm2=1.17.0 \
+        pbskera=1.4.0 \
+        isoquant=3.13.1 \
+        samtools \
+        bcftools \
+        htslib \
+        scanpy \
+        anndata \
+        gffutils
+    mamba clean -afy
+
+    # The bioconda `pbskera` package installs the binary as `skera`, but the
+    # pipeline's SPLIT_READS process calls `pbskera split`. Add an alias so both
+    # names resolve (covers the skipped skera step and the standard `full` entry).
+    if [ -x /opt/conda/bin/skera ] && [ ! -e /opt/conda/bin/pbskera ]; then
+        ln -s skera /opt/conda/bin/pbskera
+    fi
+
+    # IsoQuant 3.13.1 installs its entry point as `isoquant`, but the pipeline's
+    # isoquant.nf calls `isoquant.py`. A file named `isoquant.py` inside
+    # /opt/conda/bin would shadow the `isoquant` python package on sys.path (the
+    # running script's own dir is searched first), breaking `from isoquant import
+    # main_entry` for BOTH `isoquant` and `isoquant.py`. Instead put a thin bash
+    # wrapper in a SEPARATE dir that is on PATH but never on Python's sys.path.
+    mkdir -p /opt/wrappers
+    printf '#!/usr/bin/env bash\nexec isoquant "$@"\n' > /opt/wrappers/isoquant.py
+    chmod +x /opt/wrappers/isoquant.py
+
+%environment
+    export PATH=/opt/wrappers:/opt/conda/bin:$PATH
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    # scanpy imports numba @njit(cache=True) and matplotlib at import time; point
+    # their caches at writable /tmp so they work inside the read-only container
+    # (the container rootfs is read-only; only bind-mounted /tmp etc. are writable).
+    export NUMBA_CACHE_DIR=/tmp
+    export MPLCONFIGDIR=/tmp
+
+%runscript
+    exec "$@"
+
+%test
+    set -e
+    # Build-time %test runs with a read-only HOME=/root; redirect caches to /tmp
+    # so the numba/matplotlib import path used by scanpy can write.
+    export HOME=/tmp NUMBA_CACHE_DIR=/tmp MPLCONFIGDIR=/tmp XDG_CACHE_HOME=/tmp
+    # `skera`/`isoquant` are the real binaries; `pbskera`/`isoquant.py` are the
+    # aliases the pipeline invokes.
+    for t in isoseq lima pbmm2 skera pbskera samtools bcftools bgzip tabix isoquant isoquant.py; do command -v "$t"; done
+    # verify the isoquant.py wrapper actually runs (i.e. the isoquant import is not shadowed)
+    isoquant.py --help >/dev/null
+    python -c "import scanpy, anndata, gffutils, pandas, scipy, numpy, pysam; print('python deps OK')"

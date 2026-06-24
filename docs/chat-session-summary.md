@@ -57,11 +57,17 @@ The only hard-wired container paths were dead Sanger `.sif` files. Replaced with
 
 `MPILEUP`, `SUBSET_VCF`, and the `match_gt.nf` (gtcheck) steps need `bcftools`/`bgzip`/`tabix`, which the default `wtsi_pbsc_tools.sif` lacked. Added **`bcftools` + `htslib`** to `containers/wtsi_pbsc_tools.def` (`samtools` already present, so `MPILEUP` gets samtools+bcftools together); `%test` extended to assert them. `build_wtsi_pbsc_tools.sh` now installs the new `.sif` **atomically** (temp + `mv`) so a concurrent run never reads a half-written image. Rebuild = LSF job `295410999` — **DONE / verified** (`bcftools 1.23.1`, `bgzip`, `tabix` + all existing tools present; 510 MB).
   - *Not added (flagged):* `bedtools` (used by `find_mapped_*`/smartSplit chunked path) and `sinto` (`SPLIT_BAM_SINTO`) — add later if those branches are enabled.
+  - *Version control:* `containers/wtsi_pbsc_tools.def` + `build_wtsi_pbsc_tools.sh` are force-added to git (`git add -f`); the repo's `/containers/*` ignore keeps the built `.sif`, build logs, `.nextflow*`, and `work/` out.
 
 ### E. Current run status & next step
 
 - LSF run `295403780` **EXITED** (old-config `TAG_BAM`); `.nf_run_state` is still `running` → **resumable** (cached `REMOVE_PRIMER` 6/6 + `create_genedb_fasta_perChr` 25/25 preserved).
 - Rebuild `295410999` **DONE / verified** ✓. **Next:** resubmit `bsub_wtsi_pbsc_mulligan.sh` **without** `FORCE_FRESH` to resume — the new config (generous `TAG_BAM` etc.) + superset image carry it past the failure point.
+
+### F. Git commits (branch `main`, local — not pushed)
+
+- `938dfed` — *Standardize resources, modernize containers, scrub Sanger paths for St. Jude LSF* (19 files: process relabeling, `base.config` rewrite, container biocontainer swaps + SQANTI3 script fixes, `default_params.conf` scrub + `run_mode=null`, `dev/split_chr.py` + `scripts/db_subset.py` cleanups, this doc).
+- *follow-up* — version-control the image recipe: force-add `containers/wtsi_pbsc_tools.def` (bcftools/htslib) + `containers/build_wtsi_pbsc_tools.sh` (atomic `.sif` swap), plus this doc update.
 
 ---
 
