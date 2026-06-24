@@ -1,5 +1,5 @@
 process find_mapped_and_unmapped_regions_per_sampleChrom {
-  label 'medium_job'
+  label 'process_single'
 
   input:
       tuple val(chrom), val(sample_id), path(bam), path(bai)
@@ -17,7 +17,7 @@ process find_mapped_and_unmapped_regions_per_sampleChrom {
 }
 
 process acrossSamples_mapped_unmapped_regions_perChr {
-  label 'mini_job'
+  label 'process_single'
 
   input:
       tuple val(chrom), val(sample_ids), path(unmapped_beds), path(mapped_beds)
@@ -41,7 +41,7 @@ process acrossSamples_mapped_unmapped_regions_perChr {
 
 
 process suggest_splits_binarySearch {
-  label 'mini_job'
+  label 'process_single'
 
     input:
       tuple val(chrom), val(sample_ids), path(bams), path(bais), path(unmapped_regions_bed)
@@ -61,7 +61,7 @@ process suggest_splits_binarySearch {
 
 
 process split_bams_perChunk {
-  label 'micro_multithread_job'
+  label 'process_low'
   input:
     tuple val(chrom), val(sample_ids), path(bams), path(bais), val(formattedRegion), val(programmaticRegion)
     val(suffix)

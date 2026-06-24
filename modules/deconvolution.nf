@@ -1,7 +1,7 @@
 
 
 process MPILEUP {
-    label 'mpileup'
+    label 'process_single'
     publishDir "${params.results_output}deconvolution/mpileup", mode: 'copy'
 
     input:
@@ -23,7 +23,7 @@ process MPILEUP {
 }
 
 process SUBSET_VCF {
-    label 'subset_vcf'
+    label 'process_single'
     publishDir "${params.results_output}deconvolution/mpileup", mode: 'copy'
 
     input:
@@ -40,8 +40,8 @@ process SUBSET_VCF {
 }
 
 process CELLSNP {
-    label 'cellsnp'
-    container "/software/hgi/containers/yascp/yascp.cog.sanger.ac.uk-public-yascp_qc_jan_2025.sif"
+    label 'process_low'
+    container "https://depot.galaxyproject.org/singularity/cellsnp-lite:1.2.3--ha0c3a46_6"
     publishDir "${params.results_output}deconvolution/cellsnp", mode: 'copy'
 
     input:
@@ -68,9 +68,9 @@ process CELLSNP {
 
 
 process VIREO {
-    label 'deconvolution'
+    label 'process_medium'
 
-    container "/software/hgi/containers/yascp/yascp.cog.sanger.ac.uk-public-yascp_qc_jan_2025.sif"
+    container "https://depot.galaxyproject.org/singularity/vireosnp:0.5.9--pyh7e72e81_0"
 
     publishDir "${params.results_output}deconvolution/vireo", mode: 'copy', pattern: "{vireo__*,barcodes__*.tsv}"
     

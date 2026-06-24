@@ -1,5 +1,5 @@
 process GFFREAD_PROTEINS {
-    label 'gffread'
+    label 'process_single'
 
     publishDir "${params.results_output}results/transcript_info/pfam/", mode: 'copy', overwrite: true
 
@@ -17,7 +17,7 @@ process GFFREAD_PROTEINS {
 }
 
 process HMMSCAN_PFAM {
-    label 'hmmscan'
+    label 'process_medium'
 
     publishDir "${params.results_output}results/transcript_info/pfam/", mode: 'copy', overwrite: true
 

@@ -14,6 +14,57 @@
 - **Nextflow**: 25.04.8 (conda env `/research_jude/.../standalone_conda_envs/nextflow_25_04_8`)
 - **Singularity**: SingularityCE 4.3.5 (`module load singularity/4.3.5`)
 
+## Update — 2026-06-24 (resource tiers, container modernization, image rebuild)
+
+> Everything below this banner reflects fixes made **after** the original session.
+> Where it conflicts with older sections, this banner wins.
+
+### A. Runtime fixes that unblocked the run
+
+- **lima too old → FIXED.** `lima 2.9.0` aborted on every BAM (`std::length_error`, exit 134) because the input is a 2026 Revio dataset (`pb:5.0.0`). Bumped to **`lima=2.13.0`** in `containers/wtsi_pbsc_tools.def`; verified it parses the segmented BAMs with no crash. `REMOVE_PRIMER` then completed 6/6.
+- **`TAG_BAM` OOM → FIXED by relabeling (below).** With the original `tag_bam` label (memory `250.MB * attempt`), `isoseq tag` was `TERM_MEMLIMIT`-killed at **every** retry (250→500→750→1000 MB) and the run failed terminally (LSF job `295403780`, exit 1). The "~251 MB" seen earlier was the kill-point, not the true peak. The relabel to `process_medium` (36 GB) resolves it.
+
+### B. Resource model overhauled → standard nf-core tiers
+
+The pipeline shipped ~30 bespoke per-tool labels (`tag_bam`, `micro_job`, `combine_bams`, …) tuned for a single big machine, many badly under-provisioned for LSF. **All 45 processes** across `modules/*.nf` + `subworkflows/*.nf` were relabeled to the standard nf-core tiers defined in `conf/stjude_master.config`:
+
+| Tier             | cpus | mem   | time | count |
+| ---------------- | ---- | ----- | ---- | ----- |
+| `process_single` | 1    | 6 GB  | 4 h  | 29    |
+| `process_low`    | 6    | 24 GB | 4 h  | 17    |
+| `process_medium` | 12   | 36 GB | 8 h  | 7     |
+| `process_high`   | 24   | 72 GB | 16 h | 12    |
+
+(All scale `* task.attempt` on retry.) Active-path highlights: `REMOVE_PRIMER`/`REFINE_READS`/`PBMM2`/`BARCODE_CORRECTION`/isoquant first-pass → `process_high`; `TAG_BAM`/`DEDUP_READS` → `process_medium`; samtools/merge/index helpers → `process_low`/`process_single`. `executor='local'` tasks were moved onto LSF.
+
+- **`conf/base.config` fully rewritten (Option A):** the bespoke `withLabel` blocks were removed and replaced with the standard `process_single/low/medium/high` (+`process_long`/`process_high_memory`/`error_*`) tiers, kept consistent with `stjude_master`. `stjude_master` still wins at runtime (loaded via the profile), so its resource config takes priority in all cases.
+- **High-memory exception:** `SQANTI3_QC` (orig 150 GB) uses a `withName:SQANTI3_QC` override in `base.config` — `memory = 200.GB * attempt` (doubling per retry) on top of `process_high` cpu/time; the `stjude_master` queue selector routes it to `large_mem` automatically once a task requests >512 GB.
+- Validated: `nextflow config -profile stjude_master,singularity` resolves with 0 errors; 0 custom labels remain.
+
+### C. Container modernization — Sanger SIFs → pullable BioContainers
+
+The only hard-wired container paths were dead Sanger `.sif` files. Replaced with Galaxy depot biocontainers (each HEAD-checked `200`), so enabling these branches later won't hard-fail:
+
+| Process(es)                     | New container                                                                |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `CELLSNP`                       | `https://depot.galaxyproject.org/singularity/cellsnp-lite:1.2.3--ha0c3a46_6` |
+| `VIREO`                         | `https://depot.galaxyproject.org/singularity/vireosnp:0.5.9--pyh7e72e81_0`   |
+| `SQANTI3_QC` / `SQANTI3_FILTER` | `https://depot.galaxyproject.org/singularity/sqanti3:6.0.1--hdfd78af_0`      |
+
+- The SQANTI3 scripts hardcoded the **old** image's interpreter paths (`/conda/miniconda3/envs/sqanti3/bin/python /opt2/sqanti3/6.0.1/.../sqanti3_qc.py`); rewritten to call `sqanti3_qc.py` / `sqanti3_filter.py` directly and `python` for the helper scripts (the bioconda recipe confirms the image bundles `gffutils>=0.13`, `samtools`, `bedtools`). The now-invalid `containerOptions` PATH override was removed.
+
+### D. Default image rebuilt to add bcftools/htslib
+
+`MPILEUP`, `SUBSET_VCF`, and the `match_gt.nf` (gtcheck) steps need `bcftools`/`bgzip`/`tabix`, which the default `wtsi_pbsc_tools.sif` lacked. Added **`bcftools` + `htslib`** to `containers/wtsi_pbsc_tools.def` (`samtools` already present, so `MPILEUP` gets samtools+bcftools together); `%test` extended to assert them. `build_wtsi_pbsc_tools.sh` now installs the new `.sif` **atomically** (temp + `mv`) so a concurrent run never reads a half-written image. Rebuild = LSF job `295410999` — **DONE / verified** (`bcftools 1.23.1`, `bgzip`, `tabix` + all existing tools present; 510 MB).
+  - *Not added (flagged):* `bedtools` (used by `find_mapped_*`/smartSplit chunked path) and `sinto` (`SPLIT_BAM_SINTO`) — add later if those branches are enabled.
+
+### E. Current run status & next step
+
+- LSF run `295403780` **EXITED** (old-config `TAG_BAM`); `.nf_run_state` is still `running` → **resumable** (cached `REMOVE_PRIMER` 6/6 + `create_genedb_fasta_perChr` 25/25 preserved).
+- Rebuild `295410999` **DONE / verified** ✓. **Next:** resubmit `bsub_wtsi_pbsc_mulligan.sh` **without** `FORCE_FRESH` to resume — the new config (generous `TAG_BAM` etc.) + superset image carry it past the failure point.
+
+---
+
 ## Tasks Completed
 
 1. **Input-compatibility assessment**
@@ -279,6 +330,8 @@ nextflow run "${pipeline_dir}/isoseq2.nf" \
 ```
 
 ## Outstanding Issues / Next Steps
+
+0. **RUNTIME FIX IN PROGRESS — lima too old for the Revio BAMs.** The first full run (`full_segmented` + `with_quant`, LSF job `295401777`) failed at `REMOVE_PRIMER`: `lima 2.9.0` aborted on every BAM with `std::length_error: cannot create std::vector larger than max_size()` (exit 134). Diagnosis (via `singularity exec wtsi_pbsc_tools.sif` on a segmented BAM) showed the input is a 2026 Revio dataset with BAM spec `pb:5.0.0`, written by on-instrument `lima 2.11.0` / `skera 1.5.0` / `ccs 8.2.0` — newer than the container's `lima 2.9.0`. Fix: bumped `lima=2.9.0` -> `lima=2.13.0` in `containers/wtsi_pbsc_tools.def` and rebuilt (job `295403042`). `isoseq` (4.3.0, the newest biocontainer) and `pbmm2` (1.17.0) are recent enough; only `lima` needed bumping. After the rebuild completes, verify lima parses a BAM, then resume the run by resubmitting `bsub_wtsi_pbsc_mulligan.sh` WITHOUT `FORCE_FRESH` (the completed `create_genedb_fasta_perChr` tasks are cached; the failed `REMOVE_PRIMER` tasks re-run with the new lima).
 
 1. **Image build: DONE** — job `295400398` produced `containers/wtsi_pbsc_tools.sif` (487 MB) and passed `%test`. `singularity exec` verification confirmed isoseq 4.3.0, lima 2.9.0, pbmm2 1.17.0, skera 1.4.0 (+`pbskera` alias), samtools 1.23.1, and a clean runtime `import scanpy/anndata/gffutils/pysam`. Build history: `295393855` failed on a fakeroot permission-traversal issue (fixed by staging under `/tmp`); `295400359` failed `%test` because the `pbskera` binary is `skera` (fixed with a `pbskera -> skera` symlink); `295400367` failed `%test` because `import scanpy` triggered `numba @njit(cache=True)` with no writable cache (fixed by `NUMBA_CACHE_DIR=/tmp` + `MPLCONFIGDIR=/tmp` in `%environment`). A further gap was found: IsoQuant installs as `isoquant` but the pipeline calls `isoquant.py`. A first attempt added an `isoquant.py -> isoquant` **symlink** (rebuild `295400419`), but that broke BOTH commands: a file named `isoquant.py` in `/opt/conda/bin` shadows the `isoquant` python package on `sys.path` (`ImportError: cannot import name 'main_entry' from 'isoquant'`). Fixed by replacing the symlink with a thin **bash wrapper** `/opt/wrappers/isoquant.py` (`exec isoquant "$@"`) on `PATH` but not on `sys.path`, and prepending `/opt/wrappers` to `PATH`; the `%test` now runs `isoquant.py --help`. **Rebuilt as job `295400454` — DONE and verified**: `singularity exec` confirms all 7 tools resolve and `isoquant.py --help` exits 0 / reports `IsoQuant 3.13.1`. This is the final image used for the run.
 2. **The run is set for full quantification** — `assets/params.yaml` has `run_mode: "with_quant"` and `bsub_wtsi_pbsc_mulligan.sh` uses `-entry full_segmented`. The run script otherwise needs no changes (container applied via the `stjude_master` profile's global `process.container`).

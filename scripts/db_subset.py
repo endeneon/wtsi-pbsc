@@ -1,7 +1,7 @@
 
 
-db_f='/lustre/scratch126/humgen/projects/isogut/freeze02/output/results/gtf/extended_annotation.gtf.db'
-subset_f='/lustre/scratch126/humgen/projects/isogut/utils/isoforms.csv'
+db_f=None
+subset_f=None
 
 
 import gffutils

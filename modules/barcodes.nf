@@ -1,5 +1,5 @@
 process BARCODE_CORRECTION {
-    label 'barcodes'
+    label 'process_high'
     publishDir "${params.results_output}qc/correct", mode: 'copy', pattern: '*.json, *.corrected.sorted.tsv'
 
     input:
@@ -65,7 +65,7 @@ process GET_BARCODES {
 
 
 process SUPSET_BAM {
-    label 'supset_bam'
+    label 'process_low'
        
     input:
         tuple val(sample), path(bam), path(barcodes)
@@ -85,7 +85,7 @@ process SUPSET_BAM {
 }
 //DELETE supset_bam_with_bai
 process supset_bam_with_bai {
-    label 'supset_bam'
+    label 'process_low'
        
     input:
         tuple val(sample), path(bam), path(bai), path(barcodes)
@@ -105,7 +105,7 @@ process supset_bam_with_bai {
 }
 
 process DEDUP_READS {
-    label 'deduplication'
+    label 'process_medium'
 
     input:
         tuple val(sample_id), path(barcode_corrected_chunk_bam)
@@ -129,7 +129,7 @@ process DEDUP_READS {
 
 
 process COMBINE_DEDUPS {
-    label 'combine_bams'
+    label 'process_low'
     publishDir "${params.results_output}qc/dedup", mode: 'copy'
 
     input:
@@ -149,7 +149,7 @@ process COMBINE_DEDUPS {
 }
 
 process COMBINE_MUPPED {
-    label 'combine_bams'
+    label 'process_low'
     publishDir "${params.results_output}qc/mapped", mode: 'copy'
 
     input:
@@ -169,7 +169,7 @@ process COMBINE_MUPPED {
 
 
 process COMBINE_MUPPED_SUPPLEMENTARY {
-    label 'combine_bams'
+    label 'process_low'
     publishDir "${params.results_output}qc/mapped", mode: 'copy'
 
     input:
@@ -188,7 +188,7 @@ process COMBINE_MUPPED_SUPPLEMENTARY {
 
 
 process COMBINE_MUPPED_NOSUPPLEMENTARY {
-    label 'combine_bams'
+    label 'process_low'
     publishDir "${params.results_output}qc/mapped", mode: 'copy'
 
     input:
@@ -207,7 +207,7 @@ process COMBINE_MUPPED_NOSUPPLEMENTARY {
 
 
 process BAM_STATS {
-    label 'bam_stats'
+    label 'process_low'
     publishDir "${params.results_output}qc/dedup", mode: 'copy'
 
     input:

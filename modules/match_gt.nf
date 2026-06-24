@@ -1,6 +1,6 @@
 process BCFTOOLS_INDEX
 {
-  label 'bcftool_index'
+  label 'process_single'
 
   input:
     tuple val(pool_id), path(vireo_gt_vcf)
@@ -35,7 +35,7 @@ process VIREO_GT_FIX_HEADER
   //    container "${params.yascp_container_docker}"
   //}
 
-  label 'vireo_gt_fix_header'
+  label 'process_single'
 
   input:
     tuple val(pool_id), path(vireo_gt_vcf)
@@ -105,7 +105,7 @@ process GT_MATCH_POOL_AGAINST_PANEL
   //    container "${params.yascp_container_docker}"
   //}
 
-  label 'gtcheck'
+  label 'process_single'
 
   input:
     tuple val(pool_id), path(vireo_gt_vcf), path(vireo_gt_tbi), val(panel_id), path(ref_gt_vcf), path(ref_gt_csi)
@@ -138,7 +138,7 @@ process ASSIGN_DONOR_FROM_PANEL
 {
   // sum gtcheck discrepancy scores from multiple ouputput files of the same panel
   tag "${pool_panel_id}"
-  label 'gtcheck_processing'
+  label 'process_single'
   publishDir  path: "${params.results_output}deconvolution/sample_assignment/gtmatch/${pool_id}",
           pattern: "*.csv",
           mode: 'copy',
@@ -178,7 +178,7 @@ process ASSIGN_DONOR_OVERALL
 {
   // decide final donor assignment across different panels from per-panel donor assignments
   tag "${pool_id}"
-  label 'gtcheck_processing'
+  label 'process_single'
   publishDir  path: "${params.results_output}deconvolution/sample_assignment/gtmatch/${pool_id}",
           pattern: "*.csv",
           mode: 'copy',
@@ -200,8 +200,6 @@ process ASSIGN_DONOR_OVERALL
     //path("*.csv")
     path "versions.yml", emit: versions
 
-  label 'gtcheck_summary'
-
   script:
   donor_assignment_file = "${pool_id}_gt_donor_assignments.csv"
   stats_assignment_table_out = "stats_${pool_id}_gt_donor_assignments.csv"
@@ -221,7 +219,7 @@ process COMBINE_ASSIGN
 {
   // decide final donor assignment across different panels from per-panel donor assignments
   tag "${pool_id}"
-  label 'gtcheck_processing'
+  label 'process_single'
   publishDir  path: "${params.results_output}deconvolution/sample_assignment/gtmatch",
           pattern: "combined_*.csv",
           mode: 'copy',
@@ -240,8 +238,6 @@ process COMBINE_ASSIGN
     path("combined_*.csv"), emit: donor_match_tables
     path("combined_gt_donor_assignments_overall.csv"), emit: gt_match_table
     path "versions.yml", emit: versions
-
-  label 'gtcheck_summary'
 
   script:
   """

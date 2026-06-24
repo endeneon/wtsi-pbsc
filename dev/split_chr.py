@@ -200,10 +200,10 @@ def merge_splits(splits):
 #Arguemnts#
 ###########
 chunks=16
-bam_fofn='/nfs/team152/oe2/isogut/scripts/workflows/isoseq/dev/bam.fofn'
-output_f = "/lustre/scratch126/humgen/projects/isogut/tmp/split_chrom_try/suggested_splits.bed"
-bed_f='/lustre/scratch126/humgen/projects/isogut/tmp/split_chrom_try/split_points.bed'
-chrom_sizes_f='/nfs/team152/oe2/isogut/scripts/workflows/isoseq/data/hg38.chrom.sizes'
+bam_fofn=None
+output_f = None
+bed_f=None
+chrom_sizes_f=None
 chrom = "chr1"
 
 args=parse_arguments()

@@ -1,7 +1,7 @@
 
 
 process create_genedb_fasta_perChr {
-  label 'genedb_fasta'
+  label 'process_single'
 
   input:
       tuple val(chrom), path(gtf_f), path(fasta_f)

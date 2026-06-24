@@ -1,5 +1,5 @@
 process MATCH_BARCODES{
-  label 'matching_barcodes'
+  label 'process_single'
   publishDir  path: "${params.results_output}deconvolution/sample_assignment/barcode_match/",
           pattern: "combined_barcode_donor_assignments.csv",
           mode: 'copy',
@@ -38,7 +38,7 @@ process MATCH_BARCODES{
 }
 
 process COMBINE_DONOR_ASIGNMENTS{
-  label 'combine_donor_asignments'
+  label 'process_single'
   publishDir  path: "${params.results_output}deconvolution/sample_assignment/",
           pattern: "donor_assignment.csv",
           mode: 'copy',
@@ -63,7 +63,7 @@ process COMBINE_DONOR_ASIGNMENTS{
 }
 
 process REPLACE_DONOR_ASIGNMENTS{
-  label 'replace_donor_asignments'
+  label 'process_single'
 
   input:
     path(donor_asignment)
@@ -85,7 +85,7 @@ process REPLACE_DONOR_ASIGNMENTS{
 }
 
 process REMOVE_DONOR_ASIGNMENTS{
-  label 'remove_donor_asignments'
+  label 'process_single'
 
   input:
     path(donor_asignment)
@@ -107,7 +107,7 @@ process REMOVE_DONOR_ASIGNMENTS{
 }
 
 process EXTRACT_BARCODES{
-  label 'extract_barcodes'
+  label 'process_single'
 
   input:
     tuple val(pool_id), val (donor_id), path(vireo_tsv)

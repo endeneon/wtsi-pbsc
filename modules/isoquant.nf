@@ -1,5 +1,5 @@
 process create_genedb_fasta_perChr {
-  label 'micro_job'
+  label 'process_single'
 
   input:
       tuple val(chrom), path(gtf_f), path(fasta_f)
@@ -16,7 +16,7 @@ process create_genedb_fasta_perChr {
 
 process preprocess_bam {
 
-  label 'micro_multithread_job'
+  label 'process_low'
 
   input:
       tuple val(sample_id), path(bam), path(bai)
@@ -38,7 +38,7 @@ process preprocess_bam {
 
 
 process find_mapped_and_unmapped_regions_per_sampleChrom {
-  label 'medium_job'
+  label 'process_single'
 
   input:
       tuple val(sample_id), val(chrom), path(bam), path(bai)
@@ -56,7 +56,7 @@ process find_mapped_and_unmapped_regions_per_sampleChrom {
 }
 
 process acrossSamples_mapped_unmapped_regions_perChr {
-  label 'mini_job'
+  label 'process_single'
 
   input:
       tuple val(chrom), val(sample_ids), path(unmapped_beds), path(mapped_beds)
@@ -79,7 +79,7 @@ process acrossSamples_mapped_unmapped_regions_perChr {
 }
 
 process suggest_splits_binarySearch_v2 {
-  label 'mini_job_local'
+  label 'process_single'
 
     input:
       tuple val(chrom), val(sample_ids), path(bams), path(bais), path(mapped_regions_bed)
@@ -95,7 +95,7 @@ process suggest_splits_binarySearch_v2 {
 }
 
 process suggest_splits_binarySearch {
-  label 'mini_job'
+  label 'process_single'
 
     input:
       tuple val(chrom), val(sample_ids), path(bams), path(bais), path(unmapped_regions_bed)
@@ -114,7 +114,7 @@ process suggest_splits_binarySearch {
 }
 
 process split_bams {
-  label 'micro_multithread_job'
+  label 'process_low'
   input:
     tuple val(chrom), val(sample_ids), path(bams), path(bais), val(formattedRegion), val(programmaticRegion)
   output:
@@ -154,7 +154,7 @@ process split_bams {
 
 
 process run_isoquant_chunked {
-    label 'isoquant_chunked'
+    label 'process_high'
     // memory {
     //   def numReads = numReads.toInteger()
     //   def baseMemGB=3
@@ -181,7 +181,7 @@ process run_isoquant_chunked {
 }
 
 process replace_novel_names {
-    label 'micro_job'
+    label 'process_single'
 
 
     input:
@@ -317,7 +317,7 @@ process replace_novel_names {
 //////////IsoQuant output collection scripts////////
 ///////////////////////////////////////////////////
 process collect_counts_as_mtx {
-    label 'massive_job'
+    label 'process_high'
 
     input:
         path(isoquant_linear_count_files)
@@ -334,7 +334,7 @@ process collect_counts_as_mtx {
 }
 
 process collect_counts_as_mtx_perChr {
-    label 'counts_collect'
+    label 'process_medium'
     publishDir "${publish_dir}", mode: 'copy', overwrite: true
 
     input:
@@ -357,7 +357,7 @@ process collect_counts_as_mtx_perChr {
 }
 
 process collect_mtx_as_h5ad {
-    label 'counts_collect'
+    label 'process_high'
     publishDir "${publish_dir}", mode: 'copy', overwrite: true
 
     input:
@@ -376,7 +376,7 @@ process collect_mtx_as_h5ad {
 
 ///Note that there shouldn't be any duplicates in GTFs for non-overlapping regions
 process collect_gtfs {
-    label 'collect_gtfs'
+    label 'process_medium'
     publishDir "${publish_dir}", mode: 'copy', overwrite: true
     input:
         path(query_gtf_files)
@@ -411,7 +411,7 @@ process collect_gtfs {
 }
 
 process format_intron_exon_grouped_counts {
-    label 'small_job'
+    label 'process_low'
 
     input:
         tuple val(prefix), path(input_f)
@@ -428,7 +428,7 @@ process format_intron_exon_grouped_counts {
     """
 }
 process format_intron_exon_grouped_counts_perChr {
-    label 'small_job'
+    label 'process_low'
 
     input:
         tuple val(chrom), val(prefix), path(input_f)
@@ -446,7 +446,7 @@ process format_intron_exon_grouped_counts_perChr {
 
 /////////Split by chromosome only not by chunk///////////
 process isoquant_split_by_chr {
-    label 'isoquant_split_by_chr'
+    label 'process_low'
 
     input:
         tuple val(sample_id), val(chrom), path(mapped_bam), path(mapped_bai)
@@ -462,7 +462,7 @@ process isoquant_split_by_chr {
     """
 }
 process run_isoquant_perChr {
-    label 'isoquant'
+    label 'process_medium'
 
     input:
         tuple val(chrom), val(sample_ids), path(bams), path(bais)
@@ -480,7 +480,7 @@ process run_isoquant_perChr {
 
 /////////Two-pass IsoQuant///////////
 process run_isoquant_firstPass {
-label 'isoquant_firstPass'
+label 'process_high'
 
   input:
       tuple val(chrom), val(sample_id), path(bam), path(bai), path(genedb), path(fasta), path(fai)
@@ -497,7 +497,7 @@ label 'isoquant_firstPass'
 ///chrM processes///
 ////////////////////
 process run_isoquant_firstPass_withmodelconstruction {
-label 'isoquant_firstPass_withmodelconstruction'
+label 'process_high'
 
   input:
       tuple val(chrom), val(sample_id), path(bam), path(bai), path(genedb), path(fasta), path(fai)
@@ -510,7 +510,7 @@ label 'isoquant_firstPass_withmodelconstruction'
 }
 
 process replace_novel_names_firsPass_singlenovelname {
-    label 'micro_job'
+    label 'process_single'
 
 
     input:
@@ -630,7 +630,7 @@ process replace_novel_names_firsPass_singlenovelname {
 
 
 process create_model_construction_bam {
-label 'mini_job'
+label 'process_single'
 
   input:
       tuple val(chrom), val(sample_id),path(read_assignment_f), path(bam)
@@ -650,7 +650,7 @@ label 'mini_job'
 
 
 process run_isoquant_secondPass {
-label 'mini_job_local'
+label 'process_high'
 
   input:
       tuple val(chrom), val(sample_ids), path(model_consutrciont_bams),path(model_consutrciont_bais), path(genedb), path(fasta), path(fai)

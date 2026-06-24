@@ -1,6 +1,6 @@
 process SPLIT_READS {
 
-    label 'split_reads'
+    label 'process_high'
 
     publishDir "${params.results_output}qc/skera_reports", mode: 'copy', pattern: '*.segmented.summary.json, *.segmented.read_lengths.csv, *.segmented.summary.csv'
 
@@ -26,7 +26,7 @@ process SPLIT_READS {
 }
 
 process REMOVE_PRIMER {
-    label 'remove_primer'
+    label 'process_high'
 
     publishDir "${params.results_output}qc/lima_reports", mode: 'copy', pattern: "*.lima.summary"
 
@@ -52,7 +52,7 @@ process REMOVE_PRIMER {
 }
 
 process TAG_BAM {
-    label 'tag_bam'
+    label 'process_medium'
 
     input:
       tuple val(sample_id), path(primer_removed_bam)
@@ -73,7 +73,7 @@ process TAG_BAM {
 }
 
 process REFINE_READS {
-    label 'refine_reads'
+    label 'process_high'
 
     publishDir "${params.results_output}qc/refined", mode: 'copy', pattern: '*.fltnc.consensusreadset.xml, *.fltnc.filter_summary.report.json, *.fltnc.report.csv'
 

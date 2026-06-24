@@ -1,5 +1,5 @@
 process SPLIT_BAM_SINTO {
-    label 'split_bam_sinto'
+    label 'process_low'
 
     input:
     tuple val(pool_id), path(bam), path(bai), path(barcode_list)
@@ -37,7 +37,7 @@ process SPLIT_BAM_SINTO {
 
 
 process INDEX_SPLIT_BAM {
-    label 'index_bam'
+    label 'process_single'
     publishDir  path: "${params.results_output}deconvolution/bam/",
           pattern: "*.bam",
           mode: 'copy',

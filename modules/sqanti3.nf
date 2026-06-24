@@ -1,5 +1,5 @@
 process SQANTI3_QC {
-    label 'sqanti3'
+    label 'process_high'
 
     publishDir "${params.results_output}results/transcript_info/sqanti3/", mode: 'copy', overwrite: true
 
@@ -19,7 +19,7 @@ process SQANTI3_QC {
 
     script:
       """
-        /conda/miniconda3/envs/sqanti3/bin/python /opt2/sqanti3/6.0.1/SQANTI3-6.0.1/sqanti3_qc.py \
+        sqanti3_qc.py \
               --isoforms ${input_gtf_f} --refGTF ${ref_gtf_f} --refFasta ${genome_fasta_f} \
               --polyA_motif_list ${polya_f} --CAGE_peak ${cage_peak_f} \
               --report pdf -n ${task.cpus} --polyA_peak ${polya_sites} \
@@ -29,7 +29,7 @@ process SQANTI3_QC {
 }
 
 process SQANTI3_FILTER {
-  label 'sqanti3_filter'
+  label 'process_single'
 
   publishDir "${params.results_output}results/transcript_info/sqanti3/", mode: 'copy', overwrite: true
 
@@ -45,11 +45,11 @@ process SQANTI3_FILTER {
   script:
   def prefix = classification_f.baseName.replace("_classification", "")
   """
-  /conda/miniconda3/envs/sqanti3/bin/python /opt2/sqanti3/6.0.1/SQANTI3-6.0.1/sqanti3_filter.py rules  --sqanti_class ${classification_f} \
+  sqanti3_filter.py rules  --sqanti_class ${classification_f} \
       -j ${sqanti_filter_json} -d sqanti3_filter/ --filter_gtf ${corrected_gtf_f} --filter_faa ${corrected_fasta} --cpus ${task.cpus} --skip_report 
-  /conda/miniconda3/envs/sqanti3/bin/python ${baseDir}/scripts/create_genedb.py -g ${corrected_gtf_f} -o sqanti3_filter/${corrected_gtf_f}.db
-  /conda/miniconda3/envs/sqanti3/bin/python ${baseDir}/scripts/db_subset.py -d sqanti3_filter/${corrected_gtf_f}.db -i sqanti3_filter/transcript_models_pass_isoforms.txt -o sqanti3_filter/${prefix}.filtered.gtf
-  /conda/miniconda3/envs/sqanti3/bin/python ${baseDir}/scripts/create_genedb.py -g sqanti3_filter/${prefix}.filtered.gtf -o sqanti3_filter/${prefix}.filtered.gtf.db
+  python ${baseDir}/scripts/create_genedb.py -g ${corrected_gtf_f} -o sqanti3_filter/${corrected_gtf_f}.db
+  python ${baseDir}/scripts/db_subset.py -d sqanti3_filter/${corrected_gtf_f}.db -i sqanti3_filter/transcript_models_pass_isoforms.txt -o sqanti3_filter/${prefix}.filtered.gtf
+  python ${baseDir}/scripts/create_genedb.py -g sqanti3_filter/${prefix}.filtered.gtf -o sqanti3_filter/${prefix}.filtered.gtf.db
   """
 
 }

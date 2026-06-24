@@ -1,5 +1,5 @@
 process MTX_SUBSET {
-    label 'small_job'
+    label 'process_low'
 
     publishDir "${params.results_output}results/counts_sqanti3/", mode: 'copy', overwrite: true
 

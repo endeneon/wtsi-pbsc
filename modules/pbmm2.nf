@@ -1,5 +1,5 @@
 process PBMM2 {
-    label 'map_reads'
+    label 'process_high'
     //publishDir "${params.results_output}qc/mapped", mode: 'copy'
 
     input:

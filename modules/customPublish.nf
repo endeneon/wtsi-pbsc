@@ -1,6 +1,6 @@
 process customPublish {
     cache false
-    label 'mini_job_local'
+    label 'process_single'
 
 
     input:
