@@ -23,6 +23,7 @@
 
 - **lima too old → FIXED.** `lima 2.9.0` aborted on every BAM (`std::length_error`, exit 134) because the input is a 2026 Revio dataset (`pb:5.0.0`). Bumped to **`lima=2.13.0`** in `containers/wtsi_pbsc_tools.def`; verified it parses the segmented BAMs with no crash. `REMOVE_PRIMER` then completed 6/6.
 - **`TAG_BAM` OOM → FIXED by relabeling (below).** With the original `tag_bam` label (memory `250.MB * attempt`), `isoseq tag` was `TERM_MEMLIMIT`-killed at **every** retry (250→500→750→1000 MB) and the run failed terminally (LSF job `295403780`, exit 1). The "~251 MB" seen earlier was the kill-point, not the true peak. The relabel to `process_medium` (36 GB) resolves it.
+- **`DEDUP_READS` `No such variable: tmp_out_bam` → FIXED.** In `modules/barcodes.nf` (~line 121), the `DEDUP_READS` script assigned shell variables (`tmp_out_bam=…`, `out_bam=…`) but then *referenced* them unescaped as `${tmp_out_bam}` / `${out_bam}`. In a double-quoted Nextflow script block those are Groovy interpolations, so Nextflow tried to resolve them as pipeline variables and aborted the run (`No such variable: tmp_out_bam`). Escaped the four uses to `\${tmp_out_bam}` / `\${out_bam}`, leaving the genuine Nextflow interpolations (`${barcode_corrected_chunk_bam}`, `${task.cpus}`, `${b_size}`, `${baseDir}`, `${sample_id}`) and the assignment right-hand sides untouched. Swept every other process `script:`/`stub:` block in `modules/*.nf` + `subworkflows/**/*.nf` for the same pattern — **none found** (all other shell-variable uses, e.g. in `isoquant.nf`, `split_bam.nf`, `customPublish.nf`, were already correctly escaped).
 
 ### B. Resource model overhauled → standard nf-core tiers
 
@@ -62,7 +63,9 @@ The only hard-wired container paths were dead Sanger `.sif` files. Replaced with
 ### E. Current run status & next step
 
 - LSF run `295403780` **EXITED** (old-config `TAG_BAM`); `.nf_run_state` is still `running` → **resumable** (cached `REMOVE_PRIMER` 6/6 + `create_genedb_fasta_perChr` 25/25 preserved).
-- Rebuild `295410999` **DONE / verified** ✓. **Next:** resubmit `bsub_wtsi_pbsc_mulligan.sh` **without** `FORCE_FRESH` to resume — the new config (generous `TAG_BAM` etc.) + superset image carry it past the failure point.
+- Rebuild `295410999` **DONE / verified** ✓.
+- After the `TAG_BAM` relabel, resumed runs advanced past `TAG_BAM`/`REFINE_READS`/`SUPSET_BAM` and then hit the `DEDUP_READS` `No such variable: tmp_out_bam` Groovy error (see §A) — now **FIXED** in `modules/barcodes.nf`.
+- **Next:** resubmit `bsub_wtsi_pbsc_mulligan.sh` **without** `FORCE_FRESH` to resume — the new config (generous `TAG_BAM` etc.) + superset image + the `DEDUP_READS` escaping fix carry it past the failure point.
 
 ### F. Git commits (branch `main`, local — not pushed)
 

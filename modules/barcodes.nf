@@ -119,9 +119,9 @@ process DEDUP_READS {
     """
     tmp_out_bam=${barcode_corrected_chunk_bam.name.replaceAll(/\.bam/, '.dedup.tmp.bam')}
     out_bam=${barcode_corrected_chunk_bam.name.replaceAll(/\.bam/, '.dedup.bam')}
-    isoseq groupdedup  -j ${task.cpus} --batch-size ${b_size} --keep-non-real-cells ${barcode_corrected_chunk_bam} ${tmp_out_bam}
-    samtools index -@ ${task.cpus} ${tmp_out_bam}
-    bash ${baseDir}/scripts/append_to_tag.sh -i ${tmp_out_bam} -t CB:Z -s ${sample_id} -O sam | bash ${baseDir}/scripts/append_to_readname.sh -T CB:Z -O bam -o ${out_bam}
+    isoseq groupdedup  -j ${task.cpus} --batch-size ${b_size} --keep-non-real-cells ${barcode_corrected_chunk_bam} \${tmp_out_bam}
+    samtools index -@ ${task.cpus} \${tmp_out_bam}
+    bash ${baseDir}/scripts/append_to_tag.sh -i \${tmp_out_bam} -t CB:Z -s ${sample_id} -O sam | bash ${baseDir}/scripts/append_to_readname.sh -T CB:Z -O bam -o \${out_bam}
 
 
     """
