@@ -4,7 +4,7 @@ nextflow.enable.dsl=2
 include {SQANTI3_QC; SQANTI3_FILTER} from './modules/sqanti3.nf'
 
 ///Subworkflows
-include {BAM_PROCESSING; MAPPING_ONLY; DEDUP_ONLY} from './subworkflows/bam_processing/bam_processing.nf'
+include {BAM_PROCESSING; BAM_PROCESSING_SEGMENTED; MAPPING_ONLY; DEDUP_ONLY} from './subworkflows/bam_processing/bam_processing.nf'
 include {DECONVOLUTION} from './subworkflows/deconvolution/deconvolution.nf'
 include {ISOQUANT_TWOPASS_PROCESS} from './subworkflows/isoquant_recipes/isoquant_twopass_process.nf'
 include {PFAM_ANNOTATION_WF} from './subworkflows/pfam_annotation/pfam_annotation.nf'
@@ -45,9 +45,29 @@ workflow full{
   }
 }
 
+workflow full_segmented{
+  // Same as `full` but the input BAMs are already segmented (output of `pbskera split`),
+  // so the skera SPLIT_READS step is skipped and processing starts from REMOVE_PRIMER.
+  BAM_PROCESSING_SEGMENTED()
+  mapped_reads=BAM_PROCESSING_SEGMENTED.out.mapped_reads
+  if (params.run_deconvolution == 'TRUE') {
+    DECONVOLUTION(mapped_reads)
+    mapped_reads=DECONVOLUTION.out.fullBam_ch
+  }
+  mapped_reads.view()
+  if (params.run_mode == 'with_quant'){ 
+    ISOQUANT_TWOPASS_PROCESS(mapped_reads)
+  }
+}
+
 workflow bam_processing_wf {
     // Independent workflow entry for deconvolution
     BAM_PROCESSING()
+}
+
+workflow bam_processing_segmented_wf {
+    // Independent workflow entry for already-segmented input BAMs (skips skera SPLIT_READS)
+    BAM_PROCESSING_SEGMENTED()
 }
 
 workflow mapping_only_wf {
