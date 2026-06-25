@@ -278,6 +278,11 @@ process replace_novel_names {
       output_f_withexonfixtmp="\${output_dir}${programmaticRegion}\${suffix}.tmp";
       if [[ -e "\$output_f_noexonfix" ]]; then
         bash ${baseDir}/scripts/fix_exon_ids.sh "\${output_f_noexonfix}" "\${output_f_withexonfixtmp}" "${programmaticRegion}";
+        # Guard against silent data loss: fix_exon_ids.sh must never turn a
+        # non-empty GTF into an empty one (e.g. a broken awk emitting nothing).
+        if [[ -s "\$output_f_noexonfix" && ! -s "\$output_f_withexonfixtmp" ]]; then
+          echo "ERROR: fix_exon_ids.sh emptied \$output_f_noexonfix" >&2; exit 1
+        fi
         #reverting to original name
         rm \${output_f_noexonfix}
         mv \${output_f_withexonfixtmp} \${output_f_noexonfix}
@@ -607,6 +612,11 @@ process replace_novel_names_firsPass_singlenovelname {
       if [[ -e "\$output_f_noexonfix" ]]; then
         output_f_withexonfixtmp="\${output_dir}${sample_id}.${chrom}\${suffix}.tmp";
         bash ${baseDir}/scripts/fix_exon_ids.sh "\${output_f_noexonfix}" "\${output_f_withexonfixtmp}" "${sample_id}";
+        # Guard against silent data loss: fix_exon_ids.sh must never turn a
+        # non-empty GTF into an empty one (e.g. a broken awk emitting nothing).
+        if [[ -s "\$output_f_noexonfix" && ! -s "\$output_f_withexonfixtmp" ]]; then
+          echo "ERROR: fix_exon_ids.sh emptied \$output_f_noexonfix" >&2; exit 1
+        fi
         #reverting to original name
         rm \${output_f_noexonfix}
         mv \${output_f_withexonfixtmp} \${output_f_noexonfix}

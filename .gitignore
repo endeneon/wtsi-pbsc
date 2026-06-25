@@ -1,3 +1,4 @@
 run.sh
 /containers/*
 __pycache__/
+containers/wtsi_pbsc_tools.sif

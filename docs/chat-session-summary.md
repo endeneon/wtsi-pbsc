@@ -325,6 +325,88 @@ Barcode orientation check (5′ tagged `XC` tags vs whitelist, 3,839 sampled):
   correction / dedup / bcstats should produce real cells. **Next check:** the per-sample
   `fltnc.filter_summary.report.json` (`num_reads_flnc_polya`) and the bcstats cell counts.
 
+## Update — 2026-06-25 (`fix_exon_ids.sh` mawk crash silently emptied every model GTF)
+
+> The 5′ config run advanced all the way through read processing + two-pass
+> IsoQuant quantification, then died in the final `collect_gtfs` step. Root-caused
+> to a portability bug, **not** a data problem. This banner supersedes earlier
+> notes where they conflict.
+
+### O. Failure — `db_subset.py` FeatureNotFoundError
+
+LSF run **`295432635`** (fresh, 5′ config) EXITED 1 at the `collect_gtfs` process
+(work dir `c5/95e7d2be0c9a145884092408f514ff`):
+
+```text
+File ".../scripts/db_subset.py", line 51, in <module>
+    transcript = db[isoform]
+gffutils.exceptions.FeatureNotFoundError: transcript1.chr10_102503943_112944799.nnic
+```
+
+`db_subset.py` iterates the feature IDs in `all_features.csv` (built from the
+IsoQuant isoform-count TSVs — **325,774** IDs, of which **264,571 are novel,
+non-ENST** transcripts) and looks each up in `extended_annotation.gtf.db`. The
+first novel ID isn't in the DB, so it raises.
+
+### P. ROOT CAUSE — gawk-only `match()` in `fix_exon_ids.sh` + mawk container
+
+The two rename processes in `modules/isoquant.nf` (`replace_novel_names` for the
+chunked path, `replace_novel_names_firsPass_singlenovelname` for the per-sample
+chrM path) call `scripts/fix_exon_ids.sh` to prefix novel `exon_id`s. That script
+used gawk's **3-argument** `match($0, /re/, arr)` — a GNU-awk-only extension. The
+container (`wtsi_pbsc_tools.sif`, miniforge base) ships **only mawk, no gawk**, so
+awk aborted with `syntax error at or near ,` and wrote **nothing**. The rename
+script then blindly ran `rm orig; mv empty-tmp orig`, replacing the real GTF with
+an empty one. Because `fix_exon_ids.sh` ended with an always-`0` `echo`, `set -e`
+never fired → **silent** data loss.
+
+Verified the damage is systemic:
+
+| Check                                                   | Result                                   |
+| ------------------------------------------------------- | ---------------------------------------- |
+| chunk `*.transcript_models.gtf` empty (0 bytes)         | **368 / 368** ✘                          |
+| novel `transcript[0-9]+\.` in `extended_annotation.gtf` | **0** (3.24 M ref lines only) ✘          |
+| `.command.err` of every rename task                     | `awk: line 3: syntax error at or near ,` |
+
+So every novel transcript that has counts was missing from the collected GTF DB.
+
+### Q. Fix (3 edits — validated in-container)
+
+1. **`scripts/fix_exon_ids.sh`** — rewrote the awk to portable **2-arg
+   `match()` + `substr()`** (`exon = substr($0, RSTART + 9, RLENGTH - 10)`, since
+   the matched span is `exon_id "VALUE"`), added `set -euo pipefail`, and sent the
+   success message to **stderr**. Logic is otherwise byte-identical to the old
+   gawk version.
+2. **Both rename processes** (`modules/isoquant.nf`) — added a guard right after
+   the `fix_exon_ids.sh` call: if the source GTF is non-empty but the produced
+   `.tmp` is empty, `echo ERROR … >&2; exit 1` **before** the destructive
+   `rm; mv`. This (a) permanently prevents the silent-emptying footgun and
+   (b) changes the task hash so `-resume` actually **re-runs** the cached rename
+   tasks — necessary because `fix_exon_ids.sh` is invoked by absolute path and its
+   *content* is **not** part of Nextflow's resume hash.
+
+**Validation (container `wtsi_pbsc_tools.sif`):**
+
+- Real source GTF (`chr10_102503943_112944799.transcript_models.gtf`, 3,747 lines):
+  fixed script → **3,747 lines out**, no awk error, exon_ids prefixed
+  (`"1"` → `"chr10_102503943_112944799.1"`).
+- Synthetic 3-line test (`PFX`): `ENSE00001.1` → unchanged (known exon skipped);
+  `5` → `PFX.5` (numeric, add prefix); `transcript1.foo.nnic` → `PFX.nnic`
+  (re-prefix). All three branches match the original gawk behaviour.
+
+### R. Recovery
+
+`-resume` keeps the expensive isoseq + IsoQuant quantification cached; only the
+rename + collect steps re-run (their hashes changed via §Q.2). Resubmit **without**
+`FORCE_FRESH`:
+
+```bash
+bsub -J "run_bsub_nextflow_wtsi-pbsc_mulligan.$(date +%F.%T)" < bsub_wtsi_pbsc_mulligan.sh
+```
+
+- **Git:** §Q edits are **uncommitted** working-tree changes
+  (`scripts/fix_exon_ids.sh`, `modules/isoquant.nf`).
+
 ---
 
 ## Tasks Completed
