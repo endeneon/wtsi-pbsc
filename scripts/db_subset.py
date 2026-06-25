@@ -4,6 +4,8 @@ db_f=None
 subset_f=None
 
 
+import os
+import sys
 import gffutils
 import pandas as pd
 import argparse
@@ -22,8 +24,20 @@ db_f = args.database_file
 subset_f = args.isoform_file
 output_f = args.output_file
 
-# Read subset data
-subset_dat = pd.read_csv(subset_f, header=None, sep='\t')
+# Read subset data.
+# Guard against an empty feature list (e.g. when no isoforms were quantified for
+# any chromosome, so all_features.csv is empty). Without this, pandas raises
+# EmptyDataError. Instead, emit an empty GTF and exit cleanly.
+if os.path.getsize(subset_f) == 0:
+    print(f"WARNING: feature subset file '{subset_f}' is empty; writing empty output GTF '{output_f}' and exiting.", flush=True)
+    open(output_f, 'w').close()
+    sys.exit(0)
+try:
+    subset_dat = pd.read_csv(subset_f, header=None, sep='\t')
+except pd.errors.EmptyDataError:
+    print(f"WARNING: feature subset file '{subset_f}' has no parseable rows; writing empty output GTF '{output_f}' and exiting.", flush=True)
+    open(output_f, 'w').close()
+    sys.exit(0)
 
 # Connect to database
 db = gffutils.FeatureDB(db_f)

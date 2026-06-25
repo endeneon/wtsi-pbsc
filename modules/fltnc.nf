@@ -62,7 +62,7 @@ process TAG_BAM {
 
     script:
     """
-    isoseq tag -j ${task.cpus} ${primer_removed_bam} ${sample_id}.flt.bam --design T-12U-16B
+    isoseq tag -j ${task.cpus} ${primer_removed_bam} ${sample_id}.flt.bam --design ${params.tenx_design}
     """
     stub:
     """

@@ -155,6 +155,176 @@ Count matrices for all 25 chromosomes + both gene/isoform H5ADs are produced;
   `dev/split_chr.py`, `subworkflows/isoquant_recipes/isoquant_twopass.nf`,
   `scripts/mtx_to_hda5.py`).
 
+## Update — 2026-06-24 (collect_gtfs guards + ROOT-CAUSE read-loss diagnosis)
+
+> This banner supersedes earlier notes where they conflict. The pipeline now
+> *completes*, but the run produces **empty quantification** — traced here to a
+> catastrophic upstream read loss, **not** a pipeline bug.
+
+### L. `collect_gtfs` empty-data guards — pipeline can now COMPLETE
+
+The §K run's final task `collect_gtfs` crashed with `pandas EmptyDataError`
+(`scripts/db_subset.py` line 26, `pd.read_csv(all_features.csv)` on a 0-byte file).
+This is a **downstream symptom** of the empty-data problem (§M), not a real bug — but
+the pipeline should still finish gracefully. Three defensive guards were added (all
+`py_compile`-clean + functionally tested end-to-end → `ALL_GUARDS_OK`):
+
+- **`scripts/db_subset.py`** — added `import os, sys`; guard the subset read: if
+  `all_features.csv` is 0 bytes (or raises `pd.errors.EmptyDataError`), write an empty
+  output GTF and `sys.exit(0)` instead of crashing.
+- **`scripts/create_genedb.py`** — added `_has_feature_lines()`; when the input GTF
+  has no feature lines, build a **valid but empty** gffutils DB via a placeholder
+  feature (`from_string=True`) then `db.delete(all_features())`. (`gffutils.create_db`
+  raises `EmptyInputError: No lines parsed` on a truly empty file; the
+  placeholder-then-delete trick yields a reopenable 0-feature DB.)
+- **`scripts/collect_gtfs.py`** — in `main()`, if `ref_dfs + query_dfs` is empty,
+  write an empty output GTF and return (avoids the `pd.concat([])` crash). It already
+  skipped individually-empty GTFs via `is_valid_gtf()`.
+
+- **Resubmitted:** LSF job **`295432462`** (resume; `.nf_run_state=running`, the failed
+  `collect_gtfs` is not cached → re-runs with the fixed scripts).
+- **Git:** these 3 `.py` edits are **uncommitted** working-tree changes.
+
+### M. ROOT CAUSE — catastrophic read loss at `isoseq refine` (THE REAL PROBLEM)
+
+The guards let the pipeline finish, but **every quantification output is empty**
+because the data is essentially gone before quantification. Per-stage read counts for
+**Sample_875886_3461363** (counted directly with `samtools view -c`, samtools 1.22.1;
+cross-checked against PacBio JSON reports):
+
+| Stage                   | Command / file                                                        |       Reads | Δ                     |
+| ----------------------- | --------------------------------------------------------------------- | ----------: | --------------------- |
+| Segmented input         | `875886_3461363_segmented.bam` (lima input)                           |  91,210,089 | —                     |
+| **lima** (5′/3′ demux)  | `lima … 10x_3kit_primers.fasta --isoseq` → `*.5p--3p.bam`             |  89,587,471 | ✅ 98.2 % pass         |
+| **isoseq tag**          | `isoseq tag --design T-12U-16B` → `flt.bam` (50.5 GB)                 |  89,586,411 | ✅                     |
+| refine → FL             | `isoseq refine … --require-polya --min-polya-length 20`               |  89,586,411 | —                     |
+| refine → **FLNC**       | (chimera removal)                                                     | **580,010** | ❌ **−99.35 %**        |
+| refine → **FLNC+polyA** | (`--require-polya`)                                                   |     **978** | ❌ **−99.83 %**        |
+| correct                 | `isoseq correct --barcodes 3M-february-2018-REVERSE-COMPLEMENTED.txt` |         978 | ✅                     |
+| dedup (combined)        | `isoseq groupdedup` ×10 chunks                                        |         436 | ✅ 2.24 reads/UMI      |
+| bcstats                 | `isoseq bcstats --method percentile --percentile 98`                  |      419 BC | maxUMI=2, **0 cells** |
+
+Source reports: `fltnc.filter_summary.report.json` → `num_reads_fl=89,586,411`,
+`num_reads_flnc=580,010`, `num_reads_flnc_polya=978`. `dedup.json` → 419 barcodes,
+431 UMIs, 436 reads, **0 cells**, `fraction_reads_in_cells=0`. `bcstats` `.command.err`:
+*"WARNING: no cell barcodes were determined to be cells"* (max UMIs/barcode = 2 ≪
+`min_umi=1000`).
+
+**Conclusion:** dedup is healthy (978→436); the read loss is **entirely inside
+`isoseq refine`**, via two independent filters. lima passes 98 % with proper 5′/3′
+pairs, so the primers/orientation at the primer level are fine — the **read content
+itself** is the problem:
+
+1. **~99.35 % chimeric** → reads contain *internal* primers, i.e. behave like
+   un-segmented concatemers → suspected **skera segmentation / MAS-adapter mismatch**
+   when the `*_segmented.bam` was produced.
+2. **~99.83 % lack a poly-A tail** → for 10x **3′** chemistry every molecule should
+   carry poly-A; near-total absence suggests the library may actually be **10x 5′
+   chemistry** (no internal poly-A) or otherwise mis-specified.
+
+lima summary (`*.lima.summary`): input 91,210,089; passed 89,587,471; below thresholds
+1,622,618 (5p--5p 258,830; 3p--3p 169,685; below-min-end-score 1,390,981;
+below-min-ref-span 462,772). Pipeline commands captured verbatim:
+
+```text
+lima  -j 24 875886_3461363_segmented.bam .../10x_3kit_primers.fasta Sample_875886_3461363.bam --isoseq
+isoseq tag -j 12 Sample_875886_3461363.5p--3p.bam Sample_875886_3461363.flt.bam --design T-12U-16B
+isoseq refine Sample_875886_3461363.flt.bam .../10x_3kit_primers.fasta Sample_875886_3461363.fltnc.bam -j 24 --require-polya --min-polya-length 20
+isoseq correct -j 24 --method percentile --percentile 98 --barcodes 3M-february-2018-REVERSE-COMPLEMENTED.txt fltnc.bam corrected.bam
+```
+
+Key work dirs (run `wtsi-pbsc.2026-06-24.10:11:55`, Sample_875886_3461363):
+`lima dc/a72d2dee…`, `tag 00/fbf68387…`, `refine fd/b23c2a7a…`, `correct 1b/ae211798…`,
+`bcstats 52/4bca5b8f…`, `dedup b6/18651980…`
+(under `/lustre_scratch/user_scratch/szhang37/nextflow_work/wtsi-pbsc.2026-06-24.10:11:55/`).
+
+### N. HANDOFF — read-content investigation plan (resumable)
+
+> If interrupted, resume from here. Goal: identify (1) which internal primer set is
+> actually present and (2) whether this is 10x 5′ (no poly-A) vs 3′ chemistry.
+
+**Inputs / fixtures**
+
+- 50.5 GB tag output (FL reads): `…/00/fbf683873e3c809c7c36a6c24f58b6/Sample_875886_3461363.flt.bam`
+- lima demux (proper 5p--3p): `…/dc/a72d2dee7282a6fbc3111f6785f161/`
+- Pipeline primers FASTA: `/research_jude/.../scKinnex/data/10x_3kit_primers.fasta`
+- Barcode whitelist: `3M-february-2018-REVERSE-COMPLEMENTED.txt`
+- Tools: `module load samtools/1.22.1`; container `containers/wtsi_pbsc_tools.sif`.
+
+**TODO (1) — chimeric reads / internal primers**
+
+- [ ] Pull ~20–50 reads from `flt.bam` → FASTA (`samtools view … | head`).
+- [ ] Print the pipeline primer seqs from `10x_3kit_primers.fasta`.
+- [ ] grep each read for *internal* occurrences of the 5′/3′ primer (and revcomp).
+- [ ] Search online for candidate internal adapter sets — **MAS-seq / Kinnex array
+      adapters** (skera), 10x TSO / partial Read1 / Read2 — and match.
+- [ ] Decide: segmentation wrong (concatemers remain) vs internal primers from a
+      different kit.
+
+**TODO (2) — 5′ vs 3′ chemistry / poly-A**
+
+- [ ] Quantify poly-A: count `flt.bam` sample reads with a ≥20 nt 3′ A-run.
+- [ ] Inspect read structure vs `--design T-12U-16B` (T-cDNA, 12 nt UMI, 16 nt BC).
+- [ ] Compare `10x_3kit_primers.fasta` to the **10x 5′** primer/TSO set.
+- [ ] If 5′: refine must run **without** `--require-polya`, and the design/primers
+      switch to the 5′ kit.
+
+**Findings (RESOLVED — 2026-06-24):**
+
+- **Chemistry: confirmed 10x Genomics 5′ v3 (GEM-X 5′), not 3′.** The pipeline was
+  configured for the 3′ kit, which is why `isoseq refine --require-polya` discarded
+  ~99.8 % of reads.
+- **(1) chimeric / internal primers:** NOT a real chimera/internal-primer problem.
+  Read-structure analysis of a 1,000-read sample (`flt.bam`) showed **zero** internal
+  10x primer hits. 86 % of reads carried a constant 13 bp tail `CCCATATAAGAAA` =
+  revcomp of `TTTCTTATATGGG`, the 10x **5′ TSO** (the `13X` clipped by the 5′ design).
+  Its appearance reverse-complemented at the 3′ end shows the reads were simply
+  **flipped** because lima was given the 3′ primers (≈ revcomp of the 5′ primers).
+  FLNC chimera rate with the correct 5′ primers is only **0.36 %** (normal).
+- **(2) 5′ vs 3′ / poly-A:** Leading T-run (5′) median 28, **987/1000 ≥ 20** (poly-A
+  present, as poly-T on the flipped strand); trailing A-run (3′) max 7, **0/1000 ≥ 20**.
+  So poly-A IS present — the earlier note "5′ ⇒ drop `--require-polya`" was wrong.
+  With the correct 5′ primers + design the read orients 5′→3′ with poly-A at the 3′
+  end, so **`--require-polya` is KEPT**.
+
+**Empirical validation (30,000-read subset of `875886_3461363_segmented.bam`):**
+
+| Config                                                            | lima pass | tagged | FLNC   | **FLNC + polyA**    |
+| ----------------------------------------------------------------- | --------- | ------ | ------ | ------------------- |
+| **5′ (new):** `10x_5kit_primers.fasta` + `--design 16B-12U-13X-T` | 29,791    | 29,790 | 29,682 | **29,515 (98.4 %)** |
+| **3′ (old):** `10x_3kit_primers.fasta` + `--design T-12U-16B`     | 29,454    | 29,454 | —      | **0 (0 %)**         |
+
+Barcode orientation check (5′ tagged `XC` tags vs whitelist, 3,839 sampled):
+**FORWARD = 3,568 (93 %)** vs revcomp = 1 (0.03 %) ⇒ use the 5′ whitelist
+**forward / not reverse-complemented**.
+
+**Fix applied (4 changes):**
+
+1. `params.tenx_primers` → `assets/10x_5kit_primers.fasta`
+   (`>5p CTACACGACGCTCTTCCGATCT`, `>3p GTACTCTGCGTTGATACCACTGCTT`).
+2. New `params.tenx_design` (parameterizes the previously hardcoded
+   `isoseq tag --design` in `modules/fltnc.nf`); repo default stays `T-12U-16B`
+   (3′), run `params.yaml` sets **`16B-12U-13X-T`** (5′: 16 bp BC, 12 bp UMI, 13 bp TSO).
+3. `params.threeprime_whitelist` → `assets/3M-5pgex-jan-2023.txt`
+   (GEM-X 5′ v3, 3,686,400 barcodes, **forward** orientation; decompressed from
+   Cell Ranger 9.0.1 `lib/python/cellranger/barcodes/3M-5pgex-jan-2023.txt.gz`).
+4. `isoseq refine --require-polya` **kept** (5′ data has poly-A once oriented).
+
+**Resubmitted with 5′ config — 2026-06-24:**
+
+- Verified params.yaml is fully wired: all three asset files exist at the canonical
+  `/research_jude/.../wtsi-pbsc/assets/` path, `modules/fltnc.nf` consumes
+  `${params.tenx_design}`, and `conf/default_params.conf` defines the `T-12U-16B`
+  default.
+- Prior run state was `completed` (the empty-output 3′ run), so the submit script
+  started a **fresh** run (new `/lustre_scratch/.../wtsi-pbsc.<timestamp>` work dir)
+  rather than resuming.
+- Submitted via `bsub -J "run_bsub_nextflow_wtsi-pbsc_mulligan.$(date +%F.%T)" < bsub_wtsi_pbsc_mulligan.sh`
+  → **LSF job `295432635`** (queue `priority`), RUNNING on `noderome111`.
+- Expectation: refine should now retain ~98 % of reads (vs ~0 %), so barcode
+  correction / dedup / bcstats should produce real cells. **Next check:** the per-sample
+  `fltnc.filter_summary.report.json` (`num_reads_flnc_polya`) and the bcstats cell counts.
+
 ---
 
 ## Tasks Completed

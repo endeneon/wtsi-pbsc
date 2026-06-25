@@ -187,7 +187,15 @@ def main():
     query_dfs = load_gtfs(query_gtf_fs)
     ref_dfs = load_ref_gtf(ref_gtf_f) if ref_given and not subset_given else []
 
-    merged_df = merge_dfs(ref_dfs + query_dfs)
+    all_dfs = ref_dfs + query_dfs
+    if len(all_dfs) == 0:
+        # No non-empty input GTFs (e.g. every query GTF was empty and no usable
+        # reference). Emit an empty output GTF instead of crashing in pd.concat.
+        print('WARNING: no non-empty input GTFs; writing empty output GTF:', output_gtf_f, flush=True)
+        open(output_gtf_f, 'w').close()
+        return
+
+    merged_df = merge_dfs(all_dfs)
     merged_df = backfill_gene_name(merged_df)
     merged_df = recount_gene_transcripts(merged_df)
     output_str = format_gtf_output(merged_df)
