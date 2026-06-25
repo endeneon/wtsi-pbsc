@@ -470,6 +470,71 @@ preservation, killed `295438755` (+ one orphaned child task) and resubmitted as
   (`modules/bigwig.nf`, `isoseq2.nf`, `conf/stjude_master.config`,
   `bsub_wtsi_pbsc_mulligan.sh`).
 
+## Update — 2026-06-25 (GTF collection dropped regions past the sample count — FIXED + committed)
+
+> After the §Q `fix_exon_ids.sh` recovery, the rename step produced valid novel
+> GTFs, but `collect_gtfs`/`db_subset.py` *still* failed with
+> `FeatureNotFoundError` — first on `chrY`, then (after a partial fix) on `chr10`.
+> Root-caused to an inherited `groupKey` size hint capping the GTF-collection
+> channels. This banner supersedes earlier notes where they conflict.
+
+### V. Failure — `db_subset.py` FeatureNotFoundError (chrY, then chr10)
+
+The resumed run EXITED 1 at `collect_gtfs` with
+`gffutils.exceptions.FeatureNotFoundError`. `db_subset.py` iterates every feature
+ID in `all_features.csv` (built from the IsoQuant isoform counts) and looks it up
+in `extended_annotation.gtf.db`; the lookup raised because the collected GTF was
+**missing whole regions** that the counts still referenced:
+
+- A first attempt (dropping the `groupKey(chrom, chunks)` size hint → plain
+  `chrom`) fixed **chrY** but the run then failed on
+  `transcript1.chr10_102503943_112944799.nnic` — chr10's **region #13**.
+- Diagnosis: the GTF FOFN held only **288** chunk GTFs (exactly **12 per chrom**,
+  chrY **6**), while `all_features.csv` (counts) carried the full set. Every
+  chromosome was capped at its **sample count**, silently dropping all regions
+  beyond it (e.g. `chr10_102503943_112944799`, which exists upstream as a valid
+  3,747-line renamed GTF but never reached `collect_gtfs`).
+
+### W. ROOT CAUSE — inherited `groupKey(chrom, sample_size)` on the GTF channels
+
+The `chrom` value emitted by `run_isoquant_chunked` / `replace_novel_names` is **not
+a plain string** — it is a `groupKey(chrom, sample_size)` object inherited from the
+upstream second-pass grouping (the `groupKey(chrom, chrom_sample_size)` keys built in
+`isoquant_twopass_chunked_wf`). `GroupKey` carries a size hint, and
+`groupTuple(by:0)` **honours that hint**, emitting each chromosome's group as soon as
+`sample_size` items (≈12; chrY 6) arrive — so any chromosome split into **more**
+regions than there are samples loses every region past the cap.
+
+The **counts** channels (`output_isoform_counts_ch` / `output_gene_counts_ch`) escape
+this because they `.mix()` in the first-pass stream, which is keyed by a **plain
+String** `chrom`; the mixed plain key defeats the early-emit cap, so `groupTuple`
+waits for channel completion and keeps all regions. That asymmetry is exactly why the
+counts were complete but the GTFs were truncated → `db_subset.py` mismatch.
+
+### X. Fix (1 edit — verified end-to-end)
+
+`subworkflows/isoquant_recipes/isoquant_twopass.nf` — coerce the key to a plain
+`String` (`"${chrom}".toString()`) when building **both** GTF-collection channels
+(`output_existing_gtf_ch`, `output_extended_gtf_ch`), stripping the inherited
+`groupKey` size hint so `groupTuple(by:0)` collects **all** regions per chromosome.
+
+**Verified outcome (LSF run `295440400`, resume → DONE):**
+
+| Check                              | Before fix             | After fix                         |
+| ---------------------------------- | ---------------------- | --------------------------------- |
+| GTF FOFN entries                   | 288 (12/chrom; chrY 6) | **385** (16/chrom; chrY 11) ✔     |
+| `chr10_102503943_112944799` in GTF | absent ✘               | **present** (3,658 lines) ✔       |
+| `collect_gtfs` exitcode            | 1 (FeatureNotFound)    | **0**, all 4 "Finished" markers ✔ |
+| Pipeline                           | EXIT                   | **completed successfully** ✔      |
+
+- **Git:** committed as **`d1340f6`** on `main`
+  (`subworkflows/isoquant_recipes/isoquant_twopass.nf` only).
+- **Latent (not yet fixed):** the read channels (`output_corrected_reads_ch`,
+  `output_assignment_reads_ch`, `output_transcriptmodel_reads_ch`) still re-key with
+  `groupKey(chrom, chunks)` — same class of defect, but they feed deconvolution
+  (currently OFF). The §T `cleanup = false` + bsub resume-guard edits remain TEMP and
+  should be reverted once the modules are finalized.
+
 ---
 
 ## Tasks Completed
