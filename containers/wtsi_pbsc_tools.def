@@ -14,6 +14,8 @@ From: condaforge/miniforge3:latest
 #   genotype-check (match_gt) VCF steps so those branches run without a separate image.
 #   bedtools covers the IsoQuant two-pass region steps (find_mapped_and_unmapped_*,
 #   acrossSamples_*) and the smartSplit chunked path; sinto covers SPLIT_BAM_SINTO.
+#   pybedtools + pyranges are the python wrappers used by dev/split_chr.py and the
+#   scripts/ helpers (suggest_splits_binarySearch, mtx/count helpers).
 # Build (on the fakeroot LSF queue):
 #   singularity build --fakeroot wtsi_pbsc_tools.sif wtsi_pbsc_tools.def
 # ============================================================================
@@ -27,7 +29,11 @@ From: condaforge/miniforge3:latest
     export MAMBA_NO_BANNER=1
     # PacBio tools are dependency-free static binaries; samtools/isoquant/scanpy
     # bring the shared python + htslib stack the mixed-tool processes rely on.
+    # python pinned to 3.12: the miniforge base ships 3.13, but pyranges/ncls
+    # (needed by scripts/collect_gtfs.py) have no bioconda builds for 3.13, so the
+    # solve fails on the default base. 3.12 has builds for every tool below.
     mamba install -y -n base -c conda-forge -c bioconda \
+        python=3.12 \
         isoseq=4.3.0 \
         lima=2.13.0 \
         pbmm2=1.17.0 \
@@ -38,6 +44,8 @@ From: condaforge/miniforge3:latest
         htslib \
         bedtools \
         sinto \
+        pybedtools \
+        pyranges \
         scanpy \
         anndata \
         gffutils
@@ -83,4 +91,4 @@ From: condaforge/miniforge3:latest
     for t in isoseq lima pbmm2 skera pbskera samtools bcftools bgzip tabix bedtools sinto isoquant isoquant.py; do command -v "$t"; done
     # verify the isoquant.py wrapper actually runs (i.e. the isoquant import is not shadowed)
     isoquant.py --help >/dev/null
-    python -c "import scanpy, anndata, gffutils, pandas, scipy, numpy, pysam; print('python deps OK')"
+    python -c "import scanpy, anndata, gffutils, pandas, scipy, numpy, pysam, pybedtools, pyranges; print('python deps OK')"

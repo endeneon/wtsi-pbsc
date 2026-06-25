@@ -72,6 +72,89 @@ The only hard-wired container paths were dead Sanger `.sif` files. Replaced with
 - `938dfed` — *Standardize resources, modernize containers, scrub Sanger paths for St. Jude LSF* (19 files: process relabeling, `base.config` rewrite, container biocontainer swaps + SQANTI3 script fixes, `default_params.conf` scrub + `run_mode=null`, `dev/split_chr.py` + `scripts/db_subset.py` cleanups, this doc).
 - *follow-up* — version-control the image recipe: force-add `containers/wtsi_pbsc_tools.def` (bcftools/htslib) + `containers/build_wtsi_pbsc_tools.sh` (atomic `.sif` swap), plus this doc update.
 
+## Update — 2026-06-24 (two-pass IsoQuant: split guards, count collection, empty chrM)
+
+> Continues the run past BAM processing into the chunked IsoQuant two-pass
+> quantification. This banner supersedes earlier notes where they conflict.
+
+### G. Container: Python 3.12 pin + bedtools/sinto/pybedtools/pyranges
+
+The two-pass region path (`find_mapped_and_unmapped_regions_*`, `acrossSamples_*`,
+`suggest_splits_binarySearch`, smartSplit) and `SPLIT_BAM_SINTO` need `bedtools` +
+`sinto` plus the Python wrappers `pybedtools` + `pyranges` (used by
+`dev/split_chr.py` and the count/GTF helpers). These were added to
+`containers/wtsi_pbsc_tools.def`, resolving the two items flagged "not added" in §D.
+
+- **Python pinned to 3.12.** The miniforge base ships 3.13, but `pyranges`/`ncls`
+  have no bioconda builds for 3.13, so the mamba solve failed. Pinning
+  `python=3.12` (builds exist for every tool) fixes the solve; image now runs
+  **Python 3.12.13**.
+- `%test` extended to `import ... pybedtools, pyranges`. Rebuilt on the `fakeroot`
+  queue; verified — the split/region steps below ran inside the new image.
+
+### H. `dev/split_chr.py` — degenerate / inverted split-interval crash FIXED
+
+`suggest_splits_binarySearch` crashed with pysam
+`ValueError: invalid coordinates: start > stop` on chromosomes whose binary search
+produced a degenerate split (e.g. `[[0,0],[chrom_size, chrom_size-1]]`). Two guards
+added:
+
+- **Guard 1 (source-level, in `split_chr`):** when both halves of a split are empty,
+  clamp the split end to `e`, drop empty/inverted sub-intervals, and collapse to a
+  single whole-region chunk if everything degenerates.
+- **Guard 2 (defense-in-depth, after `merge_splits`):** clamp every interval end to
+  `chrom_size-1`, drop `start >= stop` intervals, and fall back to one
+  whole-chromosome chunk if none survive.
+
+Result: `suggest_splits_binarySearch` now **24/24** across all chromosomes; no
+IndexError, no inverted-interval ValueError. (Earlier `traverse_bintree` nth clamp,
+while-loop termination fallback, and `current_iter`→`curr_iter` typo fix remain.)
+
+### I. Two-pass count collection — chunked chromosomes silently dropped FIXED
+
+With the split crash gone, the run reached the two-pass output collection and exposed
+a **latent channel bug** (never before reachable). Only `chrM`'s counts reached
+`collect_*_counts_as_mtx_perChr` (ran 1 of 1); all 23 chunked chromosomes were
+dropped, and `collect_gene_mtx_as_h5ad` then crashed on the empty `chrM` matrix.
+
+- **Root cause** (`subworkflows/isoquant_recipes/isoquant_twopass.nf`,
+  `isoquant_twopass_chunked_wf`): the gene/isoform count channels inner-joined the
+  first-pass stream keyed `groupKey(chrom, bam_num=6)` with the second-pass stream
+  keyed `groupKey(chrom, chunks=16)` via `combine(by:0)`. Nextflow's `GroupKey`
+  equality **includes the size hint**, so `groupKey(chrom,6)` never matches
+  `groupKey(chrom,16)` → the join is always empty → every chunked chromosome is
+  dropped. (chrM survives only because it flows through the separate, non-chunked
+  `isoquant_chrM` path.)
+- **Fix:** replaced the brittle `combine(by:0)` join for `output_gene_counts_ch` and
+  `output_isoform_counts_ch` with `mix` + `groupTuple(by:0)` — gather both per-chrom
+  streams and group by plain `chrom`, robust to a variable number of split regions
+  per chromosome (which the §H guards now legitimately produce).
+
+### J. `scripts/mtx_to_hda5.py` — empty chrM matrix crash FIXED
+
+`chrM` produces an empty 10x matrix (`genes.tsv`/`barcodes.tsv` 0 bytes,
+`matrix.mtx` = `0 0 0`); `scanpy.read_10x_mtx` then raised
+`pandas.errors.EmptyDataError: No columns to parse from file`. Added an
+`is_empty_mtx()` check so `merge_mtx()` **skips** empty MTX dirs (and writes an empty
+AnnData if all are empty) instead of crashing.
+
+### K. Verified outcome (LSF run `295432346`, resume)
+
+After §H–§J, the resumed run advanced through the full two-pass collection:
+
+| Stage                              | Before fix    | After fix      |
+| ---------------------------------- | ------------- | -------------- |
+| `*_counts_as_mtx_perChr` (per chr) | 1 of 1 (chrM) | **25 of 25** ✔ |
+| `collect_isoform_mtx_as_h5ad`      | 0 of 1 ✘      | **1 of 1** ✔   |
+| `collect_gene_mtx_as_h5ad`         | 0 of 1 ✘      | **1 of 1** ✔   |
+
+Count matrices for all 25 chromosomes + both gene/isoform H5ADs are produced;
+`collect_gtfs` (final collection task) was running at the time of writing.
+
+- **Git:** §G–§J are uncommitted working-tree edits (`containers/wtsi_pbsc_tools.def`,
+  `dev/split_chr.py`, `subworkflows/isoquant_recipes/isoquant_twopass.nf`,
+  `scripts/mtx_to_hda5.py`).
+
 ---
 
 ## Tasks Completed

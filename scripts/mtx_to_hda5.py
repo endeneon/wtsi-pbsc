@@ -8,11 +8,26 @@ def read_mtx(directory):
     adata = sc.read_10x_mtx(directory)
     return adata
 
+def is_empty_mtx(directory):
+    """Return True if the 10x MTX directory has no features (e.g. chrM with 0 reads)."""
+    for fname in ('features.tsv', 'features.tsv.gz', 'genes.tsv', 'genes.tsv.gz'):
+        fpath = os.path.join(directory, fname)
+        if os.path.exists(fpath):
+            return os.path.getsize(fpath) == 0
+    # No features/genes file at all -> treat as empty
+    return True
+
 def merge_mtx(directories):
     adatas = []
     for directory in directories:
+        if is_empty_mtx(directory):
+            print('Skipping empty MTX dir {d}...'.format(d=directory),flush=True)
+            continue
         adatas.append(read_mtx(directory))
         print('Read {d}...'.format(d=directory),flush=True)
+    if len(adatas) == 0:
+        print('WARNING: all input MTX directories are empty; writing an empty AnnData.',flush=True)
+        return ad.AnnData()
     merged_adata = ad.concat(adatas, join='outer',axis=1)
     return merged_adata
 

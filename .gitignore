@@ -1,3 +1,4 @@
 run.sh
 /containers/*
 /assets/*
+__pycache__/

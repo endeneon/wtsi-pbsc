@@ -143,6 +143,11 @@ def traverse_bintree(splitpoints,nth=1):
     splitpoints['readcount_ratio']=splitpoints['count_left']/splitpoints['count_right']
     splitpoints.loc[splitpoints['readcount_ratio'] < 1,'readcount_ratio']=1/splitpoints.loc[splitpoints['readcount_ratio'] < 1,'readcount_ratio']
     splitpoints=splitpoints.sort_values(['readcount_ratio'],ascending=True).reset_index(drop=True)
+    #Guard against an out-of-bounds nth. The binary search only yields one
+    #candidate per tree level, so on large/sparse chromosomes a caller may ask
+    #for an nth beyond the number of available candidates. Clamp into range so
+    #the worst-ranked candidate is returned instead of raising IndexError.
+    nth=max(1,min(nth,splitpoints.shape[0]))
     return splitpoints.iloc[nth-1,:]
 def split_chr(bed,bam_files,chrom,s,e,iters=2,curr_iter=0):
     bed=bed.loc[bed[0]==chrom,:]
@@ -166,6 +171,20 @@ def split_chr(bed,bam_files,chrom,s,e,iters=2,curr_iter=0):
     while (bed_before_s.shape[0] < required_on_side) or (bed_after_e.shape[0] < required_on_side):
         not_optimal=True
         nth+=1
+        #Termination guard (applies to every chromosome, at every recursion
+        #level): the binary search produces a finite set of candidate
+        #splitpoints. On large or sparse chromosomes no candidate may have
+        #`required_on_side` breakpoints on both sides, so without this guard nth
+        #would grow past the number of candidates and traverse_bintree would
+        #index out of bounds. When the candidates are exhausted, fall back to the
+        #best-ranked splitpoint (nth=1) and accept fewer chunks than requested.
+        if nth > splitpoints.shape[0]:
+            print("WARNING: no splitpoint has {n} breakpoints on both sides for region {c}:{s}-{e}; falling back to the best-ranked splitpoint and accepting fewer chunks.".format(n=required_on_side,c=chrom,s=s,e=e),flush=True)
+            nth=1
+            best_splitpoint=traverse_bintree(splitpoints,nth=nth)
+            bed_before_s = bed.loc[(bed[1] > s) & (bed[2] < best_splitpoint[1]) ,:]
+            bed_after_e  = bed.loc[(bed[1] > best_splitpoint[2]) & (bed[2] < e) ,:]
+            break
         best_splitpoint=traverse_bintree(splitpoints,nth=nth)
         bed_before_s = bed.loc[(bed[1] > s) & (bed[2] < best_splitpoint[1]) ,:]
         bed_after_e  = bed.loc[(bed[1] > best_splitpoint[2]) & (bed[2] < e) ,:]
@@ -185,8 +204,19 @@ def split_chr(bed,bam_files,chrom,s,e,iters=2,curr_iter=0):
         return [[s,best_splitpoint[1]],[best_splitpoint[2],e]] +  split_chr(bed_before_s,bam_files,chrom,s,best_splitpoint[1],iters,curr_iter+1)
     ##if nothing is left to the left or right of the best splitpoint, return (this could possibly provide less splits than asked by the user)
     elif (bed_before_s.shape[0]==0) and (bed_after_e.shape[0]==0):
-        print("WARNING: you don't have enough splitpoints to perform optimal splitting. Returning {chunks} chunks only".format(chunks=(current_iter+1)*2 ),flush=True)
-        return [[s,best_splitpoint[1]],[best_splitpoint[2],e]]
+        print("WARNING: you don't have enough splitpoints to perform optimal splitting. Returning {chunks} chunks only".format(chunks=(curr_iter+1)*2 ),flush=True)
+        #Guard against degenerate/inverted intervals at the source. The split end
+        #can equal chrom_size, which is one past the valid 0-based coordinate e
+        #(=chrom_size-1), so clamp it to e. On large/sparse chromosomes the best
+        #splitpoint may span the whole region (start==s, end>=e); in that case
+        #both candidate sub-intervals collapse to empty, so return a single
+        #whole-region chunk instead of emitting an inverted interval that would
+        #crash pysam (start > stop) in the downstream post-checks.
+        candidate_chunks=[[s,best_splitpoint[1]],[min(best_splitpoint[2],e),e]]
+        candidate_chunks=[chunk for chunk in candidate_chunks if chunk[0] < chunk[1]]
+        if len(candidate_chunks)==0:
+            candidate_chunks=[[s,e]]
+        return candidate_chunks
     ##if there are points to the left and right
     return [[s,best_splitpoint[1]],[best_splitpoint[2],e]]  + split_chr(bed_before_s,bam_files,chrom,s,best_splitpoint[1],iters,curr_iter+1) + split_chr(bed_after_e,bam_files,chrom,best_splitpoint[2],e,iters,curr_iter+1)
 
@@ -240,6 +270,17 @@ assert  math.log2(chunks) % np.floor(math.log2(chunks)) == 0, 'chunks must be an
 iters=int(math.log2(chunks))
 splits=split_chr(bed,bam_files,chrom,0,chrom_size-1,iters=iters)
 split_intervals=merge_splits(splits)
+#Defence-in-depth guard before the pysam post-checks: clamp every interval end
+#to the valid 0-based maximum (chrom_size-1) and drop any empty or inverted
+#interval (start >= stop). Without this a degenerate split (e.g. a chromosome
+#with no usable internal break points) could pass start > stop to pysam's
+#bam.count and raise "invalid coordinates". If every interval is degenerate,
+#fall back to a single whole-chromosome chunk.
+split_intervals=[[max(0,interval[0]),min(interval[1],chrom_size-1)] for interval in split_intervals]
+split_intervals=[interval for interval in split_intervals if interval[0] < interval[1]]
+if len(split_intervals)==0:
+    print("WARNING: no valid split intervals for {chrom}; falling back to a single whole-chromosome chunk.".format(chrom=chrom),flush=True)
+    split_intervals=[[0,chrom_size-1]]
 print(split_intervals,flush=True)
 print("Number of chunks: {chunks}".format(chunks=len(split_intervals)),flush=True)
 

@@ -368,26 +368,27 @@ workflow isoquant_twopass_chunked_wf {
     ////////////////////////////////////////////////////////////
     //Setting up output channel for: counts, GTF, reads
 
-    //Combining transcript-level counts channels from first and second passes 
-    isoquant_firstpass_output_ch.combine(bam_nums_perChr_ch,by:0)
-    .map{chrom,sample_id,isoquant_output_dir,read_assignment_f,bam_f,bam_num -> [groupKey(chrom,bam_num),"${isoquant_output_dir}/${sample_id}.${chrom}/${sample_id}.${chrom}.transcript_grouped_tag_CB_counts.linear.tsv"]}
-    .groupTuple(by:0)
-    .combine(
-      isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> [groupKey(chrom,chunks),"${isoquant_output_dir}/${programmaticRegion}.discovered_transcript_grouped_tag_CB_counts.linear.noknown.tsv"]}.groupTuple(by:0),
-      by:0
+    //Combining transcript-level counts channels from first and second passes
+    //NOTE: first-pass is keyed by bam_num (#samples) and second-pass by #regions; these
+    //sizes differ, so a groupKey-based combine(by:0) never matches (GroupKey equality
+    //includes the size hint) and silently drops the chunked chromosomes. Mixing both
+    //per-chrom streams and grouping by chrom is robust to a variable number of split
+    //regions per chromosome.
+    isoquant_firstpass_output_ch
+    .map{chrom,sample_id,isoquant_output_dir,read_assignment_f,bam_f -> [chrom,"${isoquant_output_dir}/${sample_id}.${chrom}/${sample_id}.${chrom}.transcript_grouped_tag_CB_counts.linear.tsv"]}
+    .mix(
+      isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> [chrom,"${isoquant_output_dir}/${programmaticRegion}.discovered_transcript_grouped_tag_CB_counts.linear.noknown.tsv"]}
     )
-    .map{chrom,firstPass,secondPass -> [chrom,firstPass+secondPass]}
+    .groupTuple(by:0)
     .set{output_isoform_counts_ch}
 
-    //Combining gene-level counts channels from first and second passes
-    isoquant_firstpass_output_ch.combine(bam_nums_perChr_ch,by:0)
-    .map{chrom,sample_id,isoquant_output_dir,read_assignment_f,bam_f,bam_num -> [groupKey(chrom,bam_num),"${isoquant_output_dir}/${sample_id}.${chrom}/${sample_id}.${chrom}.gene_grouped_tag_CB_counts.linear.tsv"]}
-    .groupTuple(by:0)
-    .combine(
-      isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> [groupKey(chrom,chunks),"${isoquant_output_dir}/${programmaticRegion}.discovered_gene_grouped_tag_CB_counts.linear.tsv"]}.groupTuple(by:0),
-      by:0
+    //Combining gene-level counts channels from first and second passes (see note above)
+    isoquant_firstpass_output_ch
+    .map{chrom,sample_id,isoquant_output_dir,read_assignment_f,bam_f -> [chrom,"${isoquant_output_dir}/${sample_id}.${chrom}/${sample_id}.${chrom}.gene_grouped_tag_CB_counts.linear.tsv"]}
+    .mix(
+      isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> [chrom,"${isoquant_output_dir}/${programmaticRegion}.discovered_gene_grouped_tag_CB_counts.linear.tsv"]}
     )
-    .map{chrom,firstPass,secondPass -> [chrom,firstPass+secondPass]}
+    .groupTuple(by:0)
     .set{output_gene_counts_ch}
 
     //Collecting transcript models GTFs. 
