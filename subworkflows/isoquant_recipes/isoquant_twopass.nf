@@ -391,12 +391,21 @@ workflow isoquant_twopass_chunked_wf {
     .groupTuple(by:0)
     .set{output_gene_counts_ch}
 
-    //Collecting transcript models GTFs. 
-    isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> [groupKey(chrom,chunks),"${isoquant_output_dir}/${programmaticRegion}.transcript_models.gtf"]}.groupTuple(by:0)
+    //Collecting transcript models GTFs.
+    //NOTE: coerce the chrom key to a plain String ("${chrom}") before grouping. The `chrom`
+    //emitted by run_isoquant_chunked/replace_novel_names is actually a groupKey(chrom,sample_size)
+    //object inherited from the upstream second-pass grouping (see groupKey(chrom,chrom_sample_size)
+    //above). groupTuple(by:0) honours that inherited size hint and emits each chromosome after only
+    //`sample_size` regions (e.g. 12), silently dropping every region beyond that (e.g.
+    //chr10_102503943_112944799, region #13). The counts channels avoid this because they .mix() in
+    //the first-pass channel, which carries a plain-String chrom key that defeats the early-emit cap.
+    //Stripping the groupKey here makes groupTuple collect ALL regions per chromosome, so the chunk
+    //GTFs reach collect_gtfs and db_subset.py no longer fails with FeatureNotFoundError.
+    isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> ["${chrom}".toString(),"${isoquant_output_dir}/${programmaticRegion}.transcript_models.gtf"]}.groupTuple(by:0)
     .set{output_existing_gtf_ch}
 
-    //Collecting transcript models extended GTFs. 
-    isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> [groupKey(chrom,chunks),"${isoquant_output_dir}/${programmaticRegion}.extended_annotation.gtf"]}.groupTuple(by:0)
+    //Collecting transcript models extended GTFs. (see note above: coerce chrom to plain String to strip the inherited groupKey size hint)
+    isoquant_output_novel_names_ch.map{chrom,programmaticRegion,isoquant_output_dir -> ["${chrom}".toString(),"${isoquant_output_dir}/${programmaticRegion}.extended_annotation.gtf"]}.groupTuple(by:0)
     .set{output_extended_gtf_ch}
 
     //Collecting corrected reads beds from first/second passes
