@@ -407,6 +407,69 @@ bsub -J "run_bsub_nextflow_wtsi-pbsc_mulligan.$(date +%F.%T)" < bsub_wtsi_pbsc_m
 - **Git:** §Q edits are **uncommitted** working-tree changes
   (`scripts/fix_exon_ids.sh`, `modules/isoquant.nf`).
 
+## Update — 2026-06-25 (bigWig coverage tracks + work-dir cache preservation)
+
+> Two additions while the `fix_exon_ids.sh` recovery run was in flight: a new
+> bigWig-generation step off the final BAMs, and a temporary disabling of the
+> post-run work-dir cleanup so cached intermediates can be reused later.
+
+### S. New `BAM_TO_BIGWIG` process — genome-browser coverage tracks
+
+The pipeline previously produced **no** coverage/bigWig output. Added
+[modules/bigwig.nf](../modules/bigwig.nf) (`process BAM_TO_BIGWIG`) and wired it
+into both the `full` and `full_segmented` entry workflows in
+[isoseq2.nf](../isoseq2.nf).
+
+| Aspect        | Choice                                                                                                                                                                           |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input         | `BAM_PROCESSING(_SEGMENTED).out.mapped_reads` = `${sample_id}.mapped.realcells_only.bam` (+ `.bai`) — the final genome-aligned, dedup, real-cells-only BAM from `COMBINE_MUPPED` |
+| Tool          | deeptools `bamCoverage`                                                                                                                                                          |
+| Normalisation | `--normalizeUsing RPKM`                                                                                                                                                          |
+| Bin size      | `--binSize 20`                                                                                                                                                                   |
+| Output        | `${sample_id}.mapped.realcells_only.rpkm.bw` → `results/bigwig/`                                                                                                                 |
+| Container     | `https://depot.galaxyproject.org/singularity/deeptools:3.5.6--pyhdfd78af_0` (per-process override)                                                                               |
+| Label         | `process_medium`                                                                                                                                                                 |
+
+- The default container (`wtsi_pbsc_tools.sif`) ships only samtools + bedtools
+  (no `bedGraphToBigWig`/deeptools), so the process pulls a dedicated deeptools
+  image — the same per-process container pattern SQANTI3 uses. `bamCoverage`
+  reads chrom sizes from the BAM header, so no external `hg38.chrom.sizes` is
+  needed. First use pulls the image from the Galaxy depot (config allows a 3 h
+  `pullTimeout`).
+- **Resume note:** because `mapped_reads`/`COMBINE_MUPPED` is already cached, a
+  resumed run runs only the cheap new bigWig tasks — no re-mapping/re-quant.
+
+### T. Temporarily disabled post-run cleanup (preserve cache for future modules)
+
+To allow adding more modules later and reusing cached intermediates via
+`-resume` (instead of re-running the whole pipeline), the run-completion cleanup
+was disabled in three places, all tagged `TEMP(2026-06-25)`:
+
+1. **`conf/stjude_master.config`** — `cleanup = true` → **`cleanup = false`**.
+   This was the critical one: Nextflow's `cleanup = true` **physically deletes
+   the entire work dir on successful completion**, which would destroy the cache.
+2. **`bsub_wtsi_pbsc_mulligan.sh` resume guard** — now accepts `completed` as
+   well as `running` (`=~ ^(running|completed)$`), so a *successful* run still
+   auto-`-resume`s the same work dir instead of starting fresh.
+3. **`bsub_wtsi_pbsc_mulligan.sh` success branch** — no longer `rm -f`s
+   `.nf_workdir`, so the work-dir pointer survives a successful run.
+
+> **Revert** all three back (`cleanup = true`, `== "running"`, restore the `rm`)
+> once the extra modules are in and the cache is no longer needed.
+
+### U. Relaunched the recovery run under `cleanup = false`
+
+The in-flight run `295432635`→`295438755` had already read `cleanup = true` at
+launch, so its work dir would still be wiped on success. To guarantee cache
+preservation, killed `295438755` (+ one orphaned child task) and resubmitted as
+**`295439599`**. Because no success-cleanup had occurred, the existing work dir
+(`…/wtsi-pbsc.2026-06-24.21:02:59`) was intact, so the new run `-resume`s from it
+— now with `cleanup = false` and the `BAM_TO_BIGWIG` step in the DAG.
+
+- **Git:** §S–T edits are **uncommitted** working-tree changes
+  (`modules/bigwig.nf`, `isoseq2.nf`, `conf/stjude_master.config`,
+  `bsub_wtsi_pbsc_mulligan.sh`).
+
 ---
 
 ## Tasks Completed

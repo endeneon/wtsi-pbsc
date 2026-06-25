@@ -2,6 +2,7 @@ nextflow.enable.dsl=2
 
 ///Modules
 include {SQANTI3_QC; SQANTI3_FILTER} from './modules/sqanti3.nf'
+include {BAM_TO_BIGWIG} from './modules/bigwig.nf'
 
 ///Subworkflows
 include {BAM_PROCESSING; BAM_PROCESSING_SEGMENTED; MAPPING_ONLY; DEDUP_ONLY} from './subworkflows/bam_processing/bam_processing.nf'
@@ -35,6 +36,9 @@ assert params.run_mode in ['with_quant', 'pre_quant'] : "ERROR: params.run_mode 
 workflow full{
   BAM_PROCESSING()
   mapped_reads=BAM_PROCESSING.out.mapped_reads
+  // bigWig coverage tracks from the final genome-aligned, deduplicated,
+  // real-cells-only BAMs (independent of optional deconvolution).
+  BAM_TO_BIGWIG(BAM_PROCESSING.out.mapped_reads)
   if (params.run_deconvolution == 'TRUE') {
     DECONVOLUTION(mapped_reads)
     mapped_reads=DECONVOLUTION.out.fullBam_ch
@@ -50,6 +54,9 @@ workflow full_segmented{
   // so the skera SPLIT_READS step is skipped and processing starts from REMOVE_PRIMER.
   BAM_PROCESSING_SEGMENTED()
   mapped_reads=BAM_PROCESSING_SEGMENTED.out.mapped_reads
+  // bigWig coverage tracks from the final genome-aligned, deduplicated,
+  // real-cells-only BAMs (independent of optional deconvolution).
+  BAM_TO_BIGWIG(BAM_PROCESSING_SEGMENTED.out.mapped_reads)
   if (params.run_deconvolution == 'TRUE') {
     DECONVOLUTION(mapped_reads)
     mapped_reads=DECONVOLUTION.out.fullBam_ch
