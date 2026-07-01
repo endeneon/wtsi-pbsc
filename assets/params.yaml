@@ -1,0 +1,88 @@
+# ============================================================================
+# params.yaml — wtsi-pbsc pipeline (andersonlab/wtsi-pbsc)
+# Target dataset: already-segmented Kinnex BAMs -> entry BAM_PROCESSING_SEGMENTED
+#
+# How values were chosen:
+#   * Run-specific data paths come from bsub_kinnex_isoseq_submission_mulligan.sh
+#   * Parameters that define a pipeline default -> default value filled in
+#   * Parameters with no default                -> null
+#
+# WARNING: many pipeline defaults are Sanger (/lustre, /nfs) paths that do NOT
+# exist on the St. Jude HPC. They are filled in verbatim because they are the
+# documented defaults. Replace them with local equivalents before running any
+# step that consumes them.
+# ============================================================================
+
+# ----- Input / output --------------------------------------------------------
+# from bsub work_dir; segmented samplesheet (sample_id,long_read_path,nr_samples_multiplexed)
+input_samples_path: "/research_jude/rgs01_jude/groups/mulligrp/projects/mulligrp_cab/common/MULLI_875886_KINNEX/CAB_10403_Fusion_detection/assets/wtsi_pbsc_segmented_samplesheet.csv"
+# from bsub work_dir; must end with "/". Kept separate from kinnex_isoseq_output
+# so the two pipelines' results do not collide.
+results_output: "/research_jude/rgs01_jude/groups/mulligrp/projects/mulligrp_cab/common/MULLI_875886_KINNEX/CAB_10403_Fusion_detection/wtsi_pbsc_output/"
+# default (Sanger) — repo base used to locate data/hg38.chrom.sizes during quant;
+# point to the local wtsi-pbsc checkout if you run the quantification steps.
+nf_basedir: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/"
+exclude_samples: null  # no default
+
+# ----- Global run options ----------------------------------------------------
+run_mode: "with_quant"       # full run: BAM processing -> IsoQuant quantification
+run_deconvolution: null      # no default
+number_of_chunks: 10         # default
+dedup_batch_size: 5000000    # default
+
+# ----- Primers / barcodes ----------------------------------------------------
+# default (Sanger) — MAS-seq/Kinnex adapters for skera; NOT used by the
+# segmented workflow (SPLIT_READS is skipped).
+skera_primers: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/assets/skera_mas16_primers.fasta"
+# from bsub (primers_fasta) — 10X primers for lima
+tenx_primers: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/assets/10x_5kit_primers.fasta"
+# isoseq tag UMI/barcode design. Data is 10x 5' v3 (GEM-X 5'): 16bp barcode +
+# 12bp UMI + 13bp TSO on the 5' side -> 16B-12U-13X-T. (3' kit default is
+# T-12U-16B; using that on 5' data clips the wrong end and refine drops ~99.8%.)
+tenx_design: "16B-12U-13X-T"
+# 10X cell-barcode whitelist; REQUIRED by the segmented workflow
+# (BARCODE_CORRECTION). Data is 10x 5' v3 (GEM-X 5') -> use the GEM-X 5'
+# whitelist 3M-5pgex-jan-2023 in FORWARD orientation (NOT reverse-complemented;
+# 5' barcodes appear forward in the read, unlike 3' which needs the RC list).
+# Copied from cellranger-9.0.1/.../barcodes/3M-5pgex-jan-2023.txt.gz.
+threeprime_whitelist: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/assets/3M-5pgex-jan-2023.txt"
+min_polya_length: 20                      # default
+barcode_correction_method: "percentile"   # default
+barcode_correction_percentile: "98"       # default
+dedup_real_cells_only: "TRUE"             # default
+min_umi_barcodes: 1000                    # default
+
+# ----- Reference genome / annotation -----------------------------------------
+# from bsub (genome_fasta_path, gtf_path)
+genome_fasta_f: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/Databases/Genome/GRCh38/rnafusion_GRCh38/GRCh38/gencode_v46/gencode/Homo_sapiens_GRCh38_46_dna_primary_assembly.fa"
+gtf_f: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/Databases/Genome/GRCh38/rnafusion_GRCh38/GRCh38/gencode_v46/gencode/Homo_sapiens_GRCh38_46.gtf"
+
+# ----- Deconvolution / genotype check (defaults; Sanger paths) ---------------
+subset_regions_bed: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/assets/coding_regions_GRCh38__chr.bed"
+run_gtcheck: "FALSE"
+tsv_donor_panel_vcfs: null
+ZSCORE_THRESH: 8
+ZSCORE_DIST_THRESH: 8
+run_barcode_check: "FALSE"
+ref_barcode_list: null
+min_common_barcodes_percent: 40
+min_n_common_barcodes: 200
+
+# ----- SQANTI3 (defaults; Sanger paths) --------------------------------------
+sqanti3_path: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/SQANTI3/"
+cage_peak_f: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/SQANTI3/data/refTSS_v4.1_human_coordinate_no_header.hg38.bed"
+polya_sites: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/SQANTI3/data/atlas.clusters.2.0.GRCh38.96.bed"
+polya_f: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/SQANTI3/data/mouse_and_human.polyA_motif.txt"
+sqanti_filter_json: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/conf/sqanti_filter.json"
+
+# ----- IsoQuant (defaults) ---------------------------------------------------
+chunks: 16
+isoquant_exclusion_regions_bed: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/wtsi-pbsc/assets/vdj_genes.bed"
+
+# ----- Pfam annotation (default; Sanger path) --------------------------------
+pfam_db: "/research_jude/rgs01_jude/groups/cab/projects/automapper/common/szhang37/pulled_git_repos/SQANTI3/data/Pfam-A.hmm"
+
+# ----- nf-core config plumbing (defaults) ------------------------------------
+custom_config_version: "master"
+custom_config_base: "https://raw.githubusercontent.com/nf-core/configs/master"
+
